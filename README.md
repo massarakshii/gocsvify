@@ -18,10 +18,10 @@ go mod tidy
 go build -o gocsvify .
 
 # автономный режим (в настройках "startServer": false)
-./xls_converter -settings_path=./settings.json
+./gocsvify -settings_path=./settings.json
 
 # серверный режим (в настройках "startServer": true)
-./xls_converter -env=dev
+./gocsvify -env=dev
 ```
 
 При первом запуске без `-settings_path` рядом создаётся `settings.json` со значениями по умолчанию.
