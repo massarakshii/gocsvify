@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"xls_converter/settings"
+	"gocsvify/settings"
 )
 
 func convert(t *testing.T, content []byte, delimiter string) (string, error) {

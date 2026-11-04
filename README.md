@@ -1,96 +1,102 @@
 # gocsvify
 
-Сервис-демон, который конвертирует файлы **XLS, XLSX, XLSM, ACCDB, MDB** в **CSV** (по одному файлу на лист или таблицу). Работает в двух режимах:
+[Русская версия](README_RU.md)
 
-- **автономный**: следит за папкой `in`, конвертирует файлы, складывает результат в `out`;
-- **серверный**: то же плюс HTTP API для загрузки, проверки статуса и скачивания.
+A daemon that converts **XLS, XLSX, XLSM, ACCDB and MDB** files to **CSV** (one file per sheet or table). It runs in two modes:
 
-Внешних утилит не нужно: форматы Excel и Access читаются встроенными парсерами.
+- **standalone**: watches the `in` folder, converts files and puts the results into `out`;
+- **server**: the same, plus an HTTP API for uploading files, checking status and downloading results.
 
-## Требования
+No external tools are required: Excel and Access formats are read by built-in parsers.
+
+## Requirements
 
 - Go 1.27+
 
-## Сборка и запуск
+## Build and run
 
 ```bash
 go mod tidy
 go build -o gocsvify .
 
-# автономный режим (в настройках "startServer": false)
+# standalone mode ("startServer": false in the settings)
 ./gocsvify -settings_path=./settings.json
 
-# серверный режим (в настройках "startServer": true)
+# server mode ("startServer": true in the settings)
 ./gocsvify -env=dev
 ```
 
-При первом запуске без `-settings_path` рядом создаётся `settings.json` со значениями по умолчанию.
+On the first run without `-settings_path`, a `settings.json` with default values is created next to the executable.
 
-| Флаг | По умолчанию | Описание |
-|------|--------------|----------|
-| `-env` | `prod` | `dev`: пути из настроек используются как есть. `prod`: относительные пути считаются от каталога исполняемого файла |
-| `-settings_path` | пусто | Путь к файлу настроек (иначе `./settings.json`) |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-env` | `prod` | `dev`: paths from the settings are used as is. `prod`: relative paths are resolved against the executable's directory |
+| `-settings_path` | empty | Path to the settings file. If empty, `settings.json` next to the executable is used (created with defaults if missing) |
 
-Остановка: `Ctrl+C` или `SIGTERM`. Сервис дорабатывает текущие файлы (до 30 с), недоделанные остаются во входной папке.
+Stop with `Ctrl+C` or `SIGTERM`. The service finishes the files it is working on (up to 30 s); unfinished files stay in the input folder.
 
-## Автономный режим
+## Standalone mode
 
-Положите файл в папку `in`. Результат появится в `out/<имя файла без расширения>/0.csv`, `1.csv`, … Исходник переедет в `history`, а при ошибке в `failed`. Если файлов нет дольше `idleTimeout`, демон завершается.
+Put a file into the `in` folder. The result appears in `out/<file name without extension>/0.csv`, `1.csv`, … The source file is moved to `history`, or to `failed` if the conversion fails. If there are no files for longer than `idleTimeout`, the daemon exits.
 
 ## HTTP API
 
 ```bash
-# загрузка: вернёт fileKey
+# upload: returns fileKey
 curl -F "file=@report.xlsx" http://localhost:8080/upload
 
-# статус: new | processing | done | error
+# status: new | processing | done | error
 curl "http://localhost:8080/check?key=<fileKey>"
 
-# скачать все листы (ZIP)
+# download all sheets (ZIP)
 curl -OJ "http://localhost:8080/download?key=<fileKey>"
 
-# скачать один лист (нумерация с 0)
+# download a single sheet (zero-based)
 curl -OJ "http://localhost:8080/download?key=<fileKey>&sheetNum=0"
 ```
 
-Основные коды: `202` файл принят, `413` файл больше `maxUploadSize`, `422` файл ещё не обработан или конвертация завершилась ошибкой, `404` ключ не найден. У API нет авторизации, поэтому ставьте перед ним прокси.
+Main status codes: `202` file accepted, `413` file larger than `maxUploadSize`, `422` file not processed yet or the conversion failed, `404` key not found. The API has no authentication, so put a reverse proxy in front of it.
 
-## Настройки (`settings.json`)
+## Settings (`settings.json`)
 
-Недостающие ключи берутся из значений по умолчанию. Длительности: строка Go (`"10s"`, `"1m30s"`, `"2h"`) или число секунд.
+Missing keys fall back to the default values. Durations are either a Go duration string (`"10s"`, `"1m30s"`, `"2h"`) or a number of seconds.
 
-| Ключ | По умолчанию | Описание |
-|------|--------------|----------|
-| `appDir` | `./gocsvify_data` | Рабочая папка: база `app.db`, временные файлы |
-| `in` | `…/in` | Входящие файлы |
-| `out` | `…/out` | Результаты (`out/<key>/N.csv`) |
-| `history` | `…/history` | Обработанные исходники |
-| `archives` | `…/archives` | Кеш ZIP для `/download` |
-| `failed` | `…/failed` | Файлы, которые не удалось сконвертировать |
-| `isAbsPath` | `false` | `true`: пути как есть. `false`: от каталога исполняемого файла (в `-env=dev` всегда как есть) |
-| `sleep` | `10s` | Пауза между проверками входной папки |
-| `idleTimeout` | `60s` | Через сколько без файлов демон останавливается (`0`: не останавливаться) |
-| `lifeTime` | `60m` | Сколько хранить результаты, архивы и временные файлы |
-| `lifeTimeHistory` | `60m` | Сколько хранить исходники в `history` |
-| `padRows` | `false` | Дополнять строки пустыми ячейками до конца диапазона (xlsx) |
-| `delimiter` | `;` | Разделитель CSV (один однобайтовый символ) |
-| `withHidden` | `false` | Конвертировать скрытые листы xlsx |
-| `startServer` | `false` | Включить HTTP-сервер |
-| `serverPort` | `8080` | Порт сервера |
-| `readTimeout` | `600s` | Таймаут чтения запроса |
-| `readHeadTimeout` | `30s` | Таймаут чтения заголовков |
-| `writeTimeout` | `0` | Таймаут записи ответа (`0`: без ограничения) |
-| `maxUploadSize` | `256` | Максимальный размер загружаемого файла, МБ (> 0) |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `appDir` | `./gocsvify_data` | Working folder: `app.db` database, temporary files |
+| `in` | `./gocsvify_data/in` | Incoming files |
+| `out` | `./gocsvify_data/out` | Results (`out/<key>/N.csv`) |
+| `history` | `./gocsvify_data/history` | Processed source files |
+| `archives` | `./gocsvify_data/archives` | ZIP cache for `/download` |
+| `failed` | `./gocsvify_data/failed` | Files that could not be converted |
+| `isAbsPath` | `false` | `true`: paths are used as is. `false`: relative to the executable's directory (always as is with `-env=dev`) |
+| `sleep` | `10s` | Pause between checks of the input folder |
+| `idleTimeout` | `60s` | How long the daemon waits without files before stopping (`0`: never stop) |
+| `lifeTime` | `60m` | How long to keep results, archives and temporary files |
+| `lifeTimeHistory` | `60m` | How long to keep source files in `history` |
+| `padRows` | `false` | Pad rows with empty cells up to the end of the range (xlsx) |
+| `delimiter` | `;` | CSV delimiter (a single one-byte character) |
+| `withHidden` | `false` | Convert hidden xlsx sheets |
+| `startServer` | `false` | Enable the HTTP server |
+| `serverPort` | `8080` | Server port |
+| `readTimeout` | `600s` | Request read timeout |
+| `readHeadTimeout` | `30s` | Request header read timeout |
+| `writeTimeout` | `0` | Response write timeout (`0`: no limit) |
+| `maxUploadSize` | `256` | Maximum upload size in MB (must be > 0) |
 | `logLevel` | `info` | `debug`, `info`, `warn`, `error` |
-| `logFile` | пусто | Файл логов (пусто: stdout), формат JSON |
-| `useMdbLib` | `false` | Читать Access через `mdbtools` вместо встроенного читателя |
+| `logFile` | empty | Log file (empty: stdout), JSON format |
+| `useMdbLib` | `false` | Read Access files through `mdbtools` instead of the built-in reader |
 
-Ключи JSON чувствительны к регистру. Подробности и описание всего проекта: [`doc.md`](doc.md).
+JSON keys are case-sensitive. See [`doc.md`](doc.md) for details on the whole project.
 
-## Тесты
+## Tests
 
 ```bash
 go vet ./...
 go test -race ./...
-go test -short ./...   # без самых долгих тестов
+go test -short ./...   # skips the slowest tests
 ```
+
+## License
+
+MIT, see [`LICENSE`](LICENSE).

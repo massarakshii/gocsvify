@@ -1,8 +1,8 @@
 package settings
 
 // Тесты требуют Go 1.25+ с GOEXPERIMENT=jsonv2 (или Go 1.26+): пакет использует encoding/json/v2.
-// Тесты, меняющие рабочую директорию (t.Chdir), не параллельные:
-// DefaultSettingsPath - относительный путь "./settings.json".
+// Тесты, подменяющие путь к settings.json по умолчанию (useTempDefaultPath),
+// не параллельные: путь - глобальная переменная.
 
 import (
 	"os"
@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	ct "xls_converter/libs/configTime"
+	ct "gocsvify/libs/configTime"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -164,7 +164,7 @@ func TestReadSettingsDurations(t *testing.T) {
 }
 
 func TestSetDefaultSettingsWritesReadableFile(t *testing.T) {
-	chdirTemp(t)
+	useTempDefaultPath(t)
 
 	got, err := setDefaultSettings()
 	if err != nil {
@@ -174,7 +174,7 @@ func TestSetDefaultSettingsWritesReadableFile(t *testing.T) {
 		t.Errorf("returned settings differ from defaults: %+v", got)
 	}
 
-	data, err := os.ReadFile(DefaultSettingsPath)
+	data, err := os.ReadFile(getDefaultSettingsPath())
 	if err != nil {
 		t.Fatalf("settings file not created: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestSetDefaultSettingsWritesReadableFile(t *testing.T) {
 		}
 	}
 
-	back, err := readSettings(DefaultSettingsPath)
+	back, err := readSettings(getDefaultSettingsPath())
 	if err != nil {
 		t.Fatalf("readSettings of generated file: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestSetDefaultSettingsWritesReadableFile(t *testing.T) {
 }
 
 func TestSetDefaultSettingsWriteFails(t *testing.T) {
-	dir := chdirTemp(t)
+	dir := useTempDefaultPath(t)
 	// На месте settings.json лежит каталог - запись должна упасть.
 	if err := os.Mkdir(filepath.Join(dir, "settings.json"), 0o755); err != nil {
 		t.Fatal(err)
@@ -205,15 +205,20 @@ func TestSetDefaultSettingsWriteFails(t *testing.T) {
 	}
 }
 
-func chdirTemp(t *testing.T) string {
+// useTempDefaultPath подменяет путь к settings.json по умолчанию на файл во временной
+// директории и возвращает эту директорию. Путь - глобальная переменная, поэтому тест,
+// вызвавший хелпер, не должен быть параллельным.
+func useTempDefaultPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Chdir(dir)
+	old := getDefaultSettingsPath
+	getDefaultSettingsPath = func() string { return filepath.Join(dir, DefaultSettingsPath) }
+	t.Cleanup(func() { getDefaultSettingsPath = old })
 	return dir
 }
 
 func TestDefaultExists(t *testing.T) {
-	dir := chdirTemp(t)
+	dir := useTempDefaultPath(t)
 
 	if ok, err := defaultExists(); err != nil || ok {
 		t.Fatalf("defaultExists() = %v, %v; want false, nil", ok, err)
@@ -225,7 +230,7 @@ func TestDefaultExists(t *testing.T) {
 }
 
 func TestGetSettingsExplicitPath(t *testing.T) {
-	chdirTemp(t)
+	useTempDefaultPath(t)
 
 	p := writeFile(t, t.TempDir(), "custom.json", `{"serverPort": 1234, "delimiter": ","}`)
 	s, err := GetSettings(p)
@@ -235,13 +240,13 @@ func TestGetSettingsExplicitPath(t *testing.T) {
 	if s.ServerPort != 1234 || s.Delimiter != "," {
 		t.Errorf("unexpected settings: %+v", s)
 	}
-	if _, err := os.Stat(DefaultSettingsPath); err == nil {
+	if _, err := os.Stat(getDefaultSettingsPath()); err == nil {
 		t.Error("default settings file must not be created when an explicit path is given")
 	}
 }
 
 func TestGetSettingsExplicitPathErrors(t *testing.T) {
-	chdirTemp(t)
+	useTempDefaultPath(t)
 
 	dir := t.TempDir()
 	if _, err := GetSettings(filepath.Join(dir, "missing.json")); err == nil {
@@ -259,7 +264,7 @@ func TestGetSettingsExplicitPathErrors(t *testing.T) {
 }
 
 func TestGetSettingsCreatesDefaultFile(t *testing.T) {
-	chdirTemp(t)
+	useTempDefaultPath(t)
 
 	s, err := GetSettings("")
 	if err != nil {
@@ -268,12 +273,12 @@ func TestGetSettingsCreatesDefaultFile(t *testing.T) {
 	if *s != getDefaultSettings() {
 		t.Errorf("unexpected settings: %+v", s)
 	}
-	if _, err := os.Stat(DefaultSettingsPath); err != nil {
+	if _, err := os.Stat(getDefaultSettingsPath()); err != nil {
 		t.Errorf("default file must be created: %v", err)
 	}
 
 	// Повторный вызов читает файл, а не перезаписывает.
-	if err := os.WriteFile(DefaultSettingsPath, []byte(`{"serverPort": 7777}`), 0o644); err != nil {
+	if err := os.WriteFile(getDefaultSettingsPath(), []byte(`{"serverPort": 7777}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s2, err := GetSettings("")
@@ -289,7 +294,7 @@ func TestGetSettingsCreatesDefaultFile(t *testing.T) {
 }
 
 func TestGetSettingsInvalidDefaultFile(t *testing.T) {
-	dir := chdirTemp(t)
+	dir := useTempDefaultPath(t)
 	writeFile(t, dir, "settings.json", `{broken`)
 	if _, err := GetSettings(""); err == nil {
 		t.Fatal("expected error")

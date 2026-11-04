@@ -22,10 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"xls_converter/daemon"
-	ct "xls_converter/libs/configTime"
-	convertSettings "xls_converter/settings"
-	"xls_converter/store"
+	"gocsvify/daemon"
+	ct "gocsvify/libs/configTime"
+	convertSettings "gocsvify/settings"
+	"gocsvify/store"
 )
 
 // --- fakes ---

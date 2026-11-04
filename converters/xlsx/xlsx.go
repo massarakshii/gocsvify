@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/xml"
 	"fmt"
+	"gocsvify/settings"
 	"io"
 	"log/slog"
 	"math"
@@ -16,7 +17,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"xls_converter/settings"
 )
 
 type Converter struct {

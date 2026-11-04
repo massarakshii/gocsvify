@@ -4,6 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gocsvify/daemon"
+	"gocsvify/libs/str"
+	convertSettings "gocsvify/settings"
+	"gocsvify/store"
+	"gocsvify/zipper"
 	"io"
 	"log/slog"
 	"mime"
@@ -13,11 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"xls_converter/daemon"
-	"xls_converter/libs/str"
-	convertSettings "xls_converter/settings"
-	"xls_converter/store"
-	"xls_converter/zipper"
 )
 
 type Response struct {

@@ -3,6 +3,13 @@ package converters
 import (
 	"context"
 	"fmt"
+	"gocsvify/converters/accdb"
+	"gocsvify/converters/xls"
+	"gocsvify/converters/xlsx"
+	"gocsvify/libs/dirs"
+	"gocsvify/libs/str"
+	convertSettings "gocsvify/settings"
+	"gocsvify/store"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,13 +18,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"xls_converter/converters/accdb"
-	"xls_converter/converters/xls"
-	"xls_converter/converters/xlsx"
-	"xls_converter/libs/dirs"
-	"xls_converter/libs/str"
-	convertSettings "xls_converter/settings"
-	"xls_converter/store"
 )
 
 type Job struct {

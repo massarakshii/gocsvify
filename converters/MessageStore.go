@@ -3,7 +3,7 @@ package converters
 import (
 	"encoding/json/v2"
 	"fmt"
-	"xls_converter/store"
+	"gocsvify/store"
 
 	"go.etcd.io/bbolt"
 )

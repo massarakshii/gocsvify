@@ -1,26 +1,28 @@
-# Документация по проекту gocsvify
+# gocsvify documentation
 
-## Обзор
+[Русская версия](doc_ru.md)
 
-**gocsvify** — сервис для конвертации файлов Excel (XLS, XLSX, XLSM) и Access (ACCDB, MDB) в CSV. Работает как демон: следит за папкой входящих файлов, конвертирует их пулом воркеров и складывает результат в папку выхода. Дополнительно может поднимать HTTP API для загрузки файлов, проверки статуса и скачивания результата.
+## Overview
 
-Лицензия: MIT, см. файл [`LICENSE`](LICENSE)
+**gocsvify** is a service that converts Excel (XLS, XLSX, XLSM) and Access (ACCDB, MDB) files to CSV. It runs as a daemon: it watches the input folder, converts files with a worker pool and puts the results into the output folder. It can optionally start an HTTP API for uploading files, checking status and downloading results.
 
-### Основные возможности
-- **Форматы**: XLS, XLSX, XLSM, ACCDB, MDB
-- **Результат**: CSV, по одному файлу на лист/таблицу, кодировка UTF-8
-- **Параллельная обработка**: пул воркеров (по числу CPU), у каждой задачи таймаут 5 минут
-- **Два режима**: автономный (только демон и папки) и серверный (демон + HTTP API)
-- **Устойчивость**: паника при обработке одного файла не роняет воркер, битый файл уходит в `failed`, остальные продолжают обрабатываться
-- **Корректная остановка**: по SIGINT/SIGTERM демон дожидается завершения текущих задач (до 30 с)
-- **Настройка через JSON**: пути, таймауты, лимит загрузки, разделитель и т.д.
+License: MIT, see [`LICENSE`](LICENSE)
 
-## Архитектура
+### Features
+- **Formats**: XLS, XLSX, XLSM, ACCDB, MDB
+- **Output**: CSV, one file per sheet/table, UTF-8
+- **Parallel processing**: worker pool (one worker per CPU), 5-minute timeout per task
+- **Two modes**: standalone (daemon and folders only) and server (daemon + HTTP API)
+- **Resilience**: a panic while processing one file does not kill the worker; a broken file goes to `failed` and the rest keep being processed
+- **Graceful shutdown**: on SIGINT/SIGTERM the daemon waits for running tasks to finish (up to 30 s)
+- **JSON configuration**: paths, timeouts, upload limit, delimiter, etc.
+
+## Architecture
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────────┐
-│  HTTP API   │────▶│ Job (демон)  │────▶│ Converters          │
-│  /upload    │     │ пул воркеров │     │ xls / xlsx / accdb  │
+│  HTTP API   │────▶│ Job (daemon) │────▶│ Converters          │
+│  /upload    │     │ worker pool  │     │ xls / xlsx / accdb  │
 └─────────────┘     └──────────────┘     └─────────────────────┘
        │                    │
        │                    ▼
@@ -29,121 +31,125 @@
                   └──────────────────┘
 ```
 
-### Компоненты
+### Components
 
 #### 1. HTTP API (`server/server.go`)
-- `POST /upload` — загрузка файла
-- `GET /check?key=...` — статус конвертации
-- `GET /download?key=...[&sheetNum=N]` — скачивание CSV листа или ZIP со всеми листами
+- `POST /upload`: upload a file
+- `GET /check?key=...`: conversion status
+- `GET /download?key=...[&sheetNum=N]`: download a CSV sheet or a ZIP with all sheets
 
-`StartServer` возвращает `*http.Server` и канал ошибок. Ошибка запуска (например, порт занят) приходит через канал, `os.Exit` не вызывается. Таймауты сервера берутся из настроек.
+`StartServer` returns an `*http.Server` and an error channel. A startup error (for example, the port is busy) is delivered through the channel; `os.Exit` is never called. Server timeouts come from the settings.
 
 #### 2. Job (`converters/job.go`)
-Основной цикл `Run`:
-1. Создаёт рабочие директории.
-2. Если во входной папке есть файлы (подпапки и скрытые файлы `.xxx` не считаются) — запускает пул воркеров. Иначе удаляет устаревшие данные из `out`, `archives`, `tmp` (по `lifeTime`) и `history` (по `lifeTimeHistory`).
-3. Если файлов не было дольше `idleTimeout` — останавливается (в серверном режиме следующая загрузка запустит демон снова).
-4. Между итерациями ждёт `sleep`, прерывается по отмене контекста.
+Main `Run` loop:
+1. Creates the working directories.
+2. If the input folder contains files (subfolders and hidden `.xxx` files are ignored), starts the worker pool. Otherwise it removes expired data from `out`, `archives`, `tmp` (by `lifeTime`) and `history` (by `lifeTimeHistory`).
+3. If there were no files for longer than `idleTimeout`, it stops (in server mode the next upload starts the daemon again).
+4. Waits `sleep` between iterations and exits when the context is canceled.
 
-Обработка файла (`convertOne`):
-- конвертер выбирается по расширению (без учёта регистра);
-- результат пишется во временную папку `tmp/<uuid>`, затем атомарно переименовывается в `out/<key>`; прежний результат с тем же ключом заменяется только после успешной конвертации;
-- исходник переносится в `history`; при ошибке — в `failed`;
-- статус сообщения: `new` → `processing` → `done` / `error`; при остановке демона задача возвращается в `new`.
+File processing (`convertOne`):
+- the converter is chosen by extension (case-insensitive);
+- the result is written to the temporary folder `tmp/<uuid>` and then renamed to `out/<key>`; a previous result with the same key is replaced only after a successful conversion;
+- the source file is moved to `history`; on error, to `failed`;
+- message status: `new` → `processing` → `done` / `error`; when the daemon is stopped, the task goes back to `new`.
 
 #### 3. Daemon Manager (`daemon/manager.go`)
-- `StartIfNotRunning(job)` запускает демон, если он не запущен, и возвращает канал, который закрывается при его завершении;
-- `Stop(timeout)` отменяет контекст и ждёт завершения демона не дольше `timeout`.
+- `StartIfNotRunning(job)` starts the daemon if it is not running and returns a channel that is closed when the daemon finishes;
+- `Stop(timeout)` cancels the context and waits for the daemon to finish for at most `timeout`.
 
-#### 4. Конвертеры (`converters/xls`, `converters/xlsx`, `converters/accdb`)
-Реализуют интерфейс `Converter { Convert(csvPath string) error }`.
+#### 4. Converters (`converters/xls`, `converters/xlsx`, `converters/accdb`)
+They implement the `Converter { Convert(csvPath string) error }` interface.
 
-| Формат | Реализация |
-|--------|-----------|
-| XLSX/XLSM | разбор XML-архива; порядок листов по `workbook.xml`; скрытые листы пропускаются (если не включён `withHidden`); без `workbook.xml` листы идут по числу в имени файла (`sheet2` раньше `sheet10`); даты с учётом ошибки 1900 года и режима 1904 |
-| XLS | собственный парсер OLE2/BIFF8 (`libs/xlslib`) |
-| ACCDB/MDB | собственный читатель Jet/ACE (`libs/accdbread`); при `useMdbLib: true` и наличии `mdb-tools` используются `mdb-export`/`mdb-tables` |
+| Format | Implementation |
+|--------|----------------|
+| XLSX/XLSM | XML archive parser; sheet order follows `workbook.xml`; hidden sheets are skipped (unless `withHidden` is on); without `workbook.xml`, sheets are ordered by the number in the file name (`sheet2` before `sheet10`); dates handle the 1900 leap-year bug and the 1904 date system |
+| XLS | own OLE2/BIFF8 parser (`libs/xlslib`) |
+| ACCDB/MDB | own Jet/ACE reader (`libs/accdbread`); with `useMdbLib: true` and `mdbtools` installed, `mdb-export`/`mdb-tables` are used |
 
-#### 5. Хранилище сообщений (`store/`, `converters/MessageStore.go`)
-Метаданные файла (ключ, исходное имя, статус, сообщение) лежат в BoltDB (`<appDir>/app.db`, бакет `Message`).
-- серверный режим: ключ — UUID;
-- автономный режим: ключ — имя файла без расширения, исходное имя сохраняется в сообщении (так результат можно сопоставить с исходником).
+#### 5. Message store (`store/`, `converters/MessageStore.go`)
+File metadata (key, original name, status, message) is stored in BoltDB (`<appDir>/app.db`, bucket `Message`).
+- server mode: the key is a UUID;
+- standalone mode: the key is the file name without extension, and the original name is kept in the message (so a result can be matched to its source).
 
-#### 6. Настройки (`settings/settings.go`)
-Читаются из JSON поверх значений по умолчанию (отсутствующий ключ не обнуляется), затем проверяются. Если файла нет, при первом запуске создаётся `settings.json` со значениями по умолчанию.
+#### 6. Settings (`settings/settings.go`)
+Read from JSON on top of default values (a missing key is not zeroed), then validated. If the file does not exist, a `settings.json` with default values is created next to the executable on first run.
 
-## Структура проекта
+## Project layout
 
 ```
 gocsvify/
-├── main.go                  # Точка входа, жизненный цикл, сигналы
+├── main.go                  # Entry point, lifecycle, signals
 ├── converters/
-│   ├── interface.go         # Интерфейс Converter
-│   ├── job.go               # Цикл демона, пул воркеров
-│   ├── MessageStore.go      # Реализация хранилища на BoltDB
-│   ├── xls/                 # Конвертер XLS (testdata/sample.xls)
-│   ├── xlsx/                # Конвертер XLSX/XLSM
-│   └── accdb/               # Конвертер ACCDB/MDB (testdata/*.accdb)
+│   ├── interface.go         # Converter interface
+│   ├── job.go               # Daemon loop, worker pool
+│   ├── MessageStore.go      # BoltDB-backed store
+│   ├── xls/                 # XLS converter (testdata/sample.xls)
+│   ├── xlsx/                # XLSX/XLSM converter
+│   └── accdb/               # ACCDB/MDB converter (testdata/*.accdb)
 ├── daemon/
-│   ├── job.go               # Интерфейс Job
-│   └── manager.go           # Запуск/остановка демона
+│   ├── job.go               # Job interface
+│   └── manager.go           # Daemon start/stop
 ├── server/server.go         # HTTP API
-├── store/                   # Message и интерфейс MessageStore
-├── settings/settings.go     # Настройки
-├── zipper/                  # Упаковка результата в ZIP
+├── store/                   # Message and the MessageStore interface
+├── settings/settings.go     # Settings
+├── zipper/                  # Packing results into ZIP
 ├── libs/
-│   ├── xlslib/              # Парсер BIFF8 (XLS)
-│   ├── accdbread/           # Читатель Jet/ACE (ACCDB/MDB)
-│   ├── configTime/          # Duration для JSON ("10s" или число секунд)
-│   ├── dirs/                # Создание директорий
-│   └── str/                 # UUID, проверка числовой строки
+│   ├── xlslib/              # BIFF8 (XLS) parser
+│   ├── accdbread/           # Jet/ACE (ACCDB/MDB) reader
+│   ├── configTime/          # Duration for JSON ("10s" or seconds)
+│   ├── dirs/                # Directory creation
+│   └── str/                 # UUID, numeric string check
 ├── settings.json
-└── <appDir>/                # Рабочие данные (in/out/history/archives/failed/tmp, app.db)
+└── <appDir>/                # Working data (in/out/history/archives/failed/tmp, app.db)
 ```
 
-## Установка и запуск
+## Installation and running
 
-### Требования
-- **Go 1.27+** (используются `encoding/json/v2` и `errors.AsType`)
-- Внешние утилиты не нужны. `mdbtools` (`mdb-export`, `mdb-tables`) — по желанию, только при `useMdbLib: true`
+### Requirements
+- **Go 1.27+** (uses `encoding/json/v2` and `errors.AsType`)
+- No external tools needed. `mdbtools` (`mdb-export`, `mdb-tables`) is optional and only used with `useMdbLib: true`
 
-### Сборка
+### Build
 ```bash
 go mod tidy
 go build -o gocsvify .
 ```
 
-### Флаги
-| Флаг | По умолчанию | Описание |
-|------|--------------|----------|
-| `-env` | `prod` | `dev`: пути из настроек как есть; `prod`: относительные пути считаются от каталога исполняемого файла |
-| `-settings_path` | пусто | Путь к файлу настроек; если пуст, используется `./settings.json` (создаётся при отсутствии) |
+### Flags
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-env` | `prod` | `dev`: paths from the settings are used as is; `prod`: relative paths are resolved against the executable's directory |
+| `-settings_path` | empty | Path to the settings file; if empty, `settings.json` next to the executable is used (created with defaults if missing) |
 
-### Примеры
+### Examples
 ```bash
-# Автономный режим (startServer: false в настройках)
+# Standalone mode (startServer: false in the settings)
 ./gocsvify -settings_path=./settings.json
 
-# Серверный режим (startServer: true в настройках)
+# Server mode (startServer: true in the settings)
 ./gocsvify -env=dev
 ```
-Включение HTTP-сервера задаётся только настройкой `startServer`.
+The HTTP server is enabled only by the `startServer` setting.
 
-### Поведение при остановке
-- SIGINT/SIGTERM: сервер останавливается плавно (до 5 с), затем демон получает отмену и дорабатывает текущие файлы (до 30 с). Незавершённые файлы возвращаются в статус `new` и остаются во входной папке.
-- Автономный режим: если файлов нет дольше `idleTimeout`, демон завершается, процесс выходит.
-- Ошибка сервера (порт занят и т.п.): демон останавливается, процесс завершается с ошибкой.
+> The default settings file lives next to the executable. If the binary is installed in a read-only directory (for example `/usr/local/bin`), or you use `go run` (which builds into a temporary directory), pass `-settings_path` explicitly.
 
-## Конфигурация (`settings.json`)
+### Shutdown behavior
+- SIGINT/SIGTERM: the server shuts down gracefully (up to 5 s), then the daemon is canceled and finishes its current files (up to 30 s). Unfinished files return to status `new` and stay in the input folder.
+- Standalone mode: if there are no files for longer than `idleTimeout`, the daemon finishes and the process exits.
+- Server error (port busy, etc.): the daemon is stopped and the process exits with an error.
+
+## Configuration (`settings.json`)
+
+JSON does not support comments; the example below is plain JSON.
 
 ```json
 {
-  "appDir": "./local_storage",
-  "in": "./local_storage/in",
-  "out": "./local_storage/out",
-  "history": "./local_storage/history",
-  "archives": "./local_storage/archives",
-  "failed": "./local_storage/failed",
+  "appDir": "./gocsvify_data",
+  "in": "./gocsvify_data/in",
+  "out": "./gocsvify_data/out",
+  "history": "./gocsvify_data/history",
+  "archives": "./gocsvify_data/archives",
+  "failed": "./gocsvify_data/failed",
   "isAbsPath": false,
   "sleep": "10s",
   "idleTimeout": "60s",
@@ -164,63 +170,63 @@ go build -o gocsvify .
 }
 ```
 
-| Ключ | Описание |
-|------|----------|
-| `appDir` | Рабочая директория приложения: БД `app.db`, временные файлы `tmp/` |
-| `in`, `out`, `history`, `archives`, `failed` | Папки: входящие; результаты (`out/<key>/N.csv`); обработанные исходники; ZIP-кеш для `/download`; файлы с ошибками |
-| `isAbsPath` | `true` — пути используются как есть; `false` — относительны каталогу исполняемого файла (в режиме `-env=dev` всегда как есть) |
-| `sleep` | Пауза между проверками входящей папки |
-| `idleTimeout` | Сколько демон ждёт новых файлов до остановки; `0` — не останавливаться |
-| `lifeTime` | Через сколько удалять результаты, архивы и временные файлы |
-| `lifeTimeHistory` | Через сколько удалять исходники из `history` |
-| `padRows` | Дополнять строки пустыми ячейками до конца диапазона (xlsx) |
-| `delimiter` | Разделитель CSV, один однобайтовый символ |
-| `withHidden` | Конвертировать скрытые листы xlsx |
-| `startServer`, `serverPort` | HTTP-сервер и его порт |
-| `readTimeout`, `readHeadTimeout`, `writeTimeout` | Таймауты HTTP-сервера; `0` — без ограничения |
-| `maxUploadSize` | Максимальный размер загружаемого файла, **МБ** (должен быть > 0) |
-| `logLevel`, `logFile` | Уровень (`debug`/`info`/`warn`/`error`) и файл логов (пусто — stdout), формат JSON |
-| `useMdbLib` | Использовать `mdbtools` вместо встроенного читателя Access |
+| Key | Description |
+|-----|-------------|
+| `appDir` | Application working directory: `app.db` database, `tmp/` temporary files |
+| `in`, `out`, `history`, `archives`, `failed` | Folders: incoming files; results (`out/<key>/N.csv`); processed sources; ZIP cache for `/download`; files that failed |
+| `isAbsPath` | `true`: paths are used as is; `false`: relative to the executable's directory (always as is with `-env=dev`) |
+| `sleep` | Pause between checks of the input folder |
+| `idleTimeout` | How long the daemon waits for new files before stopping; `0` means never stop |
+| `lifeTime` | How long to keep results, archives and temporary files |
+| `lifeTimeHistory` | How long to keep source files in `history` |
+| `padRows` | Pad rows with empty cells up to the end of the range (xlsx) |
+| `delimiter` | CSV delimiter, a single one-byte character |
+| `withHidden` | Convert hidden xlsx sheets |
+| `startServer`, `serverPort` | HTTP server and its port |
+| `readTimeout`, `readHeadTimeout`, `writeTimeout` | HTTP server timeouts; `0` means no limit |
+| `maxUploadSize` | Maximum upload size in **MB** (must be > 0) |
+| `logLevel`, `logFile` | Level (`debug`/`info`/`warn`/`error`) and log file (empty means stdout), JSON format |
+| `useMdbLib` | Use `mdbtools` instead of the built-in Access reader |
 
-**Формат длительностей.** Строка в формате Go (`"10s"`, `"1m30s"`, `"2h"`) или число — секунды. Отрицательные значения недопустимы. Ключи JSON чувствительны к регистру.
+**Duration format.** A Go duration string (`"10s"`, `"1m30s"`, `"2h"`) or a number of seconds. Negative values are not allowed. JSON keys are case-sensitive.
 
-**Проверка при старте.** Все пути должны быть заданы, длительности ≥ 0, `maxUploadSize` > 0, `delimiter` — непустой, один байт.
+**Validation on startup.** All paths must be set, durations ≥ 0, `maxUploadSize` > 0, `delimiter` non-empty and one byte long.
 
 ## HTTP API
 
-Все ответы с ошибками и `/upload`, `/check` — JSON вида:
+Error responses and the `/upload` and `/check` responses are JSON:
 ```json
 { "success": true, "message": "...", "data": { "fileName": "...", "fileKey": "...", "status": "..." } }
 ```
-Поле `data` отсутствует, если данных нет; `status` заполняется только в `/check`.
+The `data` field is omitted when there is no data; `status` is filled only by `/check`.
 
-### 1. Загрузка — `POST /upload`
+### 1. Upload: `POST /upload`
 
-Тело — `multipart/form-data`, поле `file`. Допустимые расширения: `.xls`, `.xlsx`, `.xlsm`, `.accdb`, `.mdb` (без учёта регистра). В имени файла путь отбрасывается; файл хранится под сгенерированным ключом, поэтому выйти за пределы входной папки нельзя.
+The body is `multipart/form-data` with a `file` field. Allowed extensions: `.xls`, `.xlsx`, `.xlsm`, `.accdb`, `.mdb` (case-insensitive). Any path in the file name is discarded; the file is stored under a generated key, so it cannot escape the input folder.
 
-Успех — `202 Accepted`:
+Success is `202 Accepted`:
 ```json
 {
   "success": true,
-  "message": "Файл успешно загружен, ожидается обработка",
+  "message": "File uploaded successfully, waiting for processing",
   "data": { "fileName": "example.xlsx", "fileKey": "550e8400-e29b-41d4-a716-446655440000" }
 }
 ```
 
-| Код | Когда |
-|-----|-------|
-| 202 | Файл принят |
-| 400 | Некорректная форма, нет поля `file`, неверное имя или расширение |
-| 405 | Метод не `POST` |
-| 413 | Размер превышает `maxUploadSize` (проверяется и по `Content-Length`, и при потоковой загрузке) |
-| 422 | Не удалось сохранить сообщение или файл (при этом созданное сообщение откатывается) |
+| Code | When |
+|------|------|
+| 202 | File accepted |
+| 400 | Malformed form, missing `file` field, invalid name or extension |
+| 405 | Method is not `POST` |
+| 413 | Size exceeds `maxUploadSize` (checked both by `Content-Length` and while streaming) |
+| 422 | The message or file could not be saved (the created message is rolled back) |
 
-### 2. Статус — `GET /check?key={key}`
+### 2. Status: `GET /check?key={key}`
 
 ```json
 {
   "success": true,
-  "message": "Файл успешно конвертирован",
+  "message": "File converted successfully",
   "data": {
     "fileName": "example.xlsx",
     "fileKey": "550e8400-e29b-41d4-a716-446655440000",
@@ -229,105 +235,105 @@ go build -o gocsvify .
 }
 ```
 
-| status | Описание |
-|--------|----------|
-| `new` | Файл принят, ожидает обработки |
-| `processing` | Идёт конвертация |
-| `error` | Ошибка конвертации |
-| `done` | Готово |
+| status | Description |
+|--------|-------------|
+| `new` | File accepted, waiting for processing |
+| `processing` | Conversion in progress |
+| `error` | Conversion failed |
+| `done` | Finished |
 
-Коды: `200`, `400` (нет `key`), `404` (ключ неизвестен), `500` (ошибка хранилища).
+Codes: `200`, `400` (no `key`), `404` (unknown key), `500` (store error).
 
-### 3. Скачивание — `GET /download?key={key}[&sheetNum={N}]`
+### 3. Download: `GET /download?key={key}[&sheetNum={N}]`
 
-| Параметр | Описание |
-|----------|----------|
-| `key` | Ключ файла |
-| `sheetNum` | Номер листа с нуля. Если не указан — ZIP со всеми листами |
+| Parameter | Description |
+|-----------|-------------|
+| `key` | File key |
+| `sheetNum` | Zero-based sheet number. If omitted, a ZIP with all sheets is returned |
 
-Имя скачиваемого файла: `<исходное имя без расширения>.zip` или `<имя>_<N>.csv`. ZIP собирается при первом запросе и кешируется в `archives/` до истечения `lifeTime`.
+Download file name: `<original name without extension>.zip` or `<name>_<N>.csv`. The ZIP is built on the first request and cached in `archives/` until `lifeTime` expires.
 
-| Код | Когда |
-|-----|-------|
-| 200 | Файл отдан |
-| 400 | Нет `key` или `sheetNum` не число |
-| 404 | Ключ или лист не найдены |
-| 422 | Файл ещё не обработан (`new`/`processing`) или обработка завершилась ошибкой (`error`) |
-| 500 | Ошибка хранилища или создания архива (например, результат уже удалён очисткой) |
+| Code | When |
+|------|------|
+| 200 | File returned |
+| 400 | No `key`, or `sheetNum` is not a number |
+| 404 | Key or sheet not found |
+| 422 | File not processed yet (`new`/`processing`) or processing failed (`error`) |
+| 500 | Store or archive error (for example, the result has already been removed by cleanup) |
 
-Методы, кроме указанных, дают `405`.
+Other methods return `405`.
 
-## Формат выходных данных
+## Output format
 
 ```
 out/
 └── {fileKey}/
-    ├── 0.csv      # первый лист / таблица
+    ├── 0.csv      # first sheet / table
     ├── 1.csv
     └── ...
 ```
 
-- **Нумерация листов xlsx**: порядок вкладок в книге; скрытые листы пропускаются (если не `withHidden`), нумерация сквозная.
-- **Таблицы Access**: в алфавитном порядке, системные таблицы исключены.
-- **Разделитель**: из настроек; значения с разделителем, кавычками и переводами строк экранируются по правилам CSV.
-- **Кодировка**: UTF-8, BOM нет. Заголовков не добавляется: первая строка — первая строка листа (для Access — имена колонок).
-- **Даты**: `2023-03-15` для даты без времени, `2023-03-15 12:30:00` с временем, `12:30:00` для чистого времени. Из Access даты выводятся всегда вместе со временем.
-- **Булевы значения**: в XLS — `TRUE`/`FALSE`, в Access — `true`/`false`.
+- **xlsx sheet numbering**: tab order in the workbook; hidden sheets are skipped (unless `withHidden`), numbering is continuous.
+- **Access tables**: alphabetical order, system tables excluded.
+- **Delimiter**: from the settings; values containing the delimiter, quotes or line breaks are escaped following CSV rules.
+- **Encoding**: UTF-8, no BOM. No header is added: the first line is the first row of the sheet (for Access, the column names).
+- **Dates**: `2023-03-15` for a date without time, `2023-03-15 12:30:00` with time, `12:30:00` for a pure time. Access dates are always printed with time.
+- **Booleans**: `TRUE`/`FALSE` in XLS, `true`/`false` in Access.
 
-### Пример
+### Example
 ```csv
-Имя;Сумма;Дата
-Анна;30.5;2023-03-15
+Name;Amount;Date
+Anna;30.5;2023-03-15
 ```
 
-## Обработка ошибок
+## Error handling
 
-1. **Неподдерживаемое расширение** — файл переносится в `failed`, статус `error`.
-2. **Повреждённый или нечитаемый файл** (невалидный zip/OLE2/Access) — то же.
-3. **Паника при конвертации** — перехватывается на уровне задачи, статус `error`, воркер продолжает работу.
-4. **Остановка демона** — задача возвращается в `new`, файл остаётся во входной папке.
-5. **Недоступное хранилище** — файл переносится в `failed`.
+1. **Unsupported extension**: the file is moved to `failed`, status `error`.
+2. **Corrupted or unreadable file** (invalid zip/OLE2/Access): same.
+3. **Panic during conversion**: recovered at the task level, status `error`, the worker keeps running.
+4. **Daemon shutdown**: the task goes back to `new`, the file stays in the input folder.
+5. **Unavailable store**: the file is moved to `failed`.
 
-Повторная загрузка файла с тем же ключом (автономный режим) сбрасывает статус в `new` и после успешной конвертации заменяет прежний результат.
+Re-uploading a file with the same key (standalone mode) resets the status to `new` and replaces the previous result after a successful conversion.
 
-## Производительность
+## Performance
 
-- Число воркеров — `runtime.NumCPU()`; чтобы задать вручную, измените `numWorkers` в `start()` (`converters/job.go`).
-- Очередь задач и канал результатов буферизованы (100).
-- Таймаут одной задачи — 5 минут.
-- Потоковый разбор XML (xlsx) не загружает лист в память целиком; xls загружается в память целиком.
-- **Пустые строки.** Битые файлы с огромным числом пустых строк дают гигантский CSV. Пропуск пустых строк пока не реализован (планируется как опциональная настройка).
+- The number of workers is `runtime.NumCPU()`; to set it manually, change `numWorkers` in `start()` (`converters/job.go`).
+- The task queue and the result channel are buffered (100).
+- A single task has a 5-minute timeout.
+- xlsx is parsed as a stream and does not load a whole sheet into memory; xls is loaded into memory entirely.
+- **Empty rows.** Broken files with a huge number of empty rows produce a gigantic CSV. Skipping empty rows is not implemented yet (planned as an optional setting).
 
-## Безопасность
+## Security
 
-Уже реализовано:
-- лимит размера загрузки `maxUploadSize` (проверка по `Content-Length` и `http.MaxBytesReader`);
-- проверка расширения и имени файла, путь из имени отбрасывается;
-- таймауты чтения/записи HTTP-сервера;
-- защита парсера XLS от заведомо ложных размеров в заголовках, устойчивость парсеров XLS и Access к повреждённым файлам (проверено тестами на случайных искажениях);
-- `sheetNum` принимает только цифры, ключ ищется в хранилище, а не подставляется в путь напрямую.
+Already implemented:
+- upload size limit `maxUploadSize` (checked by `Content-Length` and `http.MaxBytesReader`);
+- file extension and name validation, any path in the name is discarded;
+- HTTP server read/write timeouts;
+- the XLS parser guards against bogus sizes in headers; the XLS and Access parsers are robust against corrupted files (verified by tests with random corruption);
+- `sheetNum` accepts digits only, and the key is looked up in the store instead of being used in a path directly.
 
-Рекомендуется:
-1. Запускать сервис в контейнере или под пользователем с минимальными правами.
-2. Ставить перед сервисом обратный прокси с аутентификацией: у API авторизации нет.
-3. Ограничивать число одновременных загрузок на уровне прокси.
+Recommended:
+1. Run the service in a container or under a user with minimal privileges.
+2. Put a reverse proxy with authentication in front of the service: the API has no authorization.
+3. Limit the number of concurrent uploads at the proxy level.
 
-## Тестирование
+## Testing
 
 ```bash
 go vet ./...
 go test -race ./...
-go test -short ./...   # пропускает самые долгие тесты (Northwind, мутации)
+go test -short ./...   # skips the slowest tests (Northwind, mutation tests)
 ```
 
-Для тестов нужен тот же Go 1.27+. Тестовые файлы лежат в `converters/xls/testdata/` и `converters/accdb/testdata/` (`sample.xls`, `sample.accdb`, `northwind.accdb`).
+The tests need the same Go 1.27+. Test files live in `converters/xls/testdata/` and `converters/accdb/testdata/` (`sample.xls`, `sample.accdb`, `northwind.accdb`).
 
-Покрыто: HTTP-сервер (`httptest`), Job с фиктивным хранилищем и временными директориями, менеджер демона, хранилище на BoltDB, настройки, все три конвертера, парсеры `xlslib` и `accdbread` (включая искажённые файлы), упаковка в ZIP.
+Covered: the HTTP server (`httptest`), the Job with a fake store and temporary directories, the daemon manager, the BoltDB store, settings, all three converters, the `xlslib` and `accdbread` parsers (including corrupted files), ZIP packing.
 
-## Расширение функциональности
+## Extending
 
-### Добавление нового конвертера
-1. Создайте `converters/yourformat/yourformat.go` с типом, реализующим `Convert(csvPath string) error`:
+### Adding a new converter
+1. Create `converters/yourformat/yourformat.go` with a type implementing `Convert(csvPath string) error`:
 ```go
 type Converter struct {
     Ctx      context.Context
@@ -340,24 +346,24 @@ func NewConverter(ctx context.Context, filePath string, s *settings.Settings) *C
 }
 
 func (c *Converter) Convert(csvPath string) error {
-    // писать файлы csvPath/0.csv, 1.csv, ... ; проверять c.Ctx.Err() в цикле
+    // write csvPath/0.csv, 1.csv, ... ; check c.Ctx.Err() in loops
     return nil
 }
 ```
-2. Добавьте расширение в `convertOne` (`converters/job.go`):
+2. Add the extension to `convertOne` (`converters/job.go`):
 ```go
 case ".yourformat":
     converterSync = yourformat.NewConverter(taskCtx, task.filepath, &j.Settings)
 ```
-3. Добавьте расширение в список допустимых в `server/server.go` (`allowedExt`).
-4. Напишите тест с реальным файлом в `testdata/`.
+3. Add the extension to the allowed list in `server/server.go` (`allowedExt`).
+4. Write a test with a real file in `testdata/`.
 
-## Известные ограничения
+## Known limitations
 
-1. **XLSM**: макросы не выполняются, файл конвертируется как обычный XLSX.
-2. **XLSX**: не поддерживаются булевы ячейки (`t="b"`), пустые строки между непустыми не восстанавливаются, абсолютные пути листов (`/xl/worksheets/...`) в `workbook.xml.rels` не распознаются.
-3. **Форматы даты и числа**: сложные пользовательские форматы могут интерпретироваться неверно.
-4. **Разделитель**: только один однобайтовый символ.
-5. **Большие файлы**: XLS читается в память целиком; очень большие файлы дольше обрабатываются и упираются в таймаут 5 минут.
-6. **Единый формат значений** между конвертерами не гарантируется (булевы значения, даты с нулевым временем).
-7. **Авторизации в API нет.**
+1. **XLSM**: macros are not executed; the file is converted like a regular XLSX.
+2. **XLSX**: boolean cells (`t="b"`) are not supported, empty rows between non-empty ones are not restored, and absolute sheet paths (`/xl/worksheets/...`) in `workbook.xml.rels` are not recognized.
+3. **Date and number formats**: complex custom formats may be interpreted incorrectly.
+4. **Delimiter**: a single one-byte character only.
+5. **Large files**: XLS is read into memory entirely; very large files take longer and run into the 5-minute timeout.
+6. **Consistent values** across converters are not guaranteed (booleans, dates with zero time).
+7. **No API authorization.**

@@ -4,11 +4,11 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	ct "gocsvify/libs/configTime"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
-	ct "xls_converter/libs/configTime"
 )
 
 type Settings struct {
@@ -37,7 +37,7 @@ type Settings struct {
 	UseMdbLib       bool        `json:"useMdbLib"`
 }
 
-const DefaultSettingsPath = "./settings.json"
+const DefaultSettingsPath = "settings.json"
 
 func GetSettings(settingsPath string) (*Settings, error) {
 	var settings Settings
@@ -52,7 +52,7 @@ func GetSettings(settingsPath string) (*Settings, error) {
 		if !exist {
 			settings, err = setDefaultSettings()
 		} else {
-			settings, err = readSettings(DefaultSettingsPath)
+			settings, err = readSettings(getDefaultSettingsPath())
 		}
 	} else {
 		settings, err = readSettings(settingsPath)
@@ -165,7 +165,7 @@ func setDefaultSettings() (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	err = os.WriteFile(DefaultSettingsPath, jsonData, 0644)
+	err = os.WriteFile(getDefaultSettingsPath(), jsonData, 0644)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -202,7 +202,7 @@ func getDefaultSettings() Settings {
 }
 
 func defaultExists() (bool, error) {
-	_, err := os.Stat(DefaultSettingsPath)
+	_, err := os.Stat(getDefaultSettingsPath())
 	if err == nil {
 		return true, nil
 	}
@@ -210,4 +210,13 @@ func defaultExists() (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+var getDefaultSettingsPath = func() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+
+	return filepath.Join(filepath.Dir(exePath), DefaultSettingsPath)
 }

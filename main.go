@@ -4,6 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	xlsconverter "gocsvify/converters"
+	"gocsvify/daemon"
+	"gocsvify/libs/dirs"
+	"gocsvify/server"
+	convertSettings "gocsvify/settings"
 	"log"
 	"log/slog"
 	"os"
@@ -11,11 +16,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
-	xlsconverter "xls_converter/converters"
-	"xls_converter/daemon"
-	"xls_converter/libs/dirs"
-	"xls_converter/server"
-	convertSettings "xls_converter/settings"
 
 	"go.etcd.io/bbolt"
 )

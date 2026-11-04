@@ -3,13 +3,13 @@ package accdb
 import (
 	"bytes"
 	"context"
+	"gocsvify/libs/accdbread"
+	"gocsvify/settings"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"xls_converter/libs/accdbread"
-	"xls_converter/settings"
 )
 
 const defaultDelimiter = ";"

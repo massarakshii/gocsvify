@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"xls_converter/settings"
+	"gocsvify/settings"
 )
 
 // testdata/sample.xls: лист «Лист1» (4 колонки, 4 строки, в т.ч. с ;, " и переводом строки)

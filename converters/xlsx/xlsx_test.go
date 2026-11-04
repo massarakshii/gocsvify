@@ -1,7 +1,7 @@
 package xlsx
 
 // Тесты требуют Go 1.25+ и GOEXPERIMENT=jsonv2: пакет импортирует
-// xls_converter/settings, который использует encoding/json/v2.
+// gocsvify/settings, который использует encoding/json/v2.
 //
 // В этом файле лежат хелперы, общие с xlsx_styler_test.go.
 
@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"xls_converter/settings"
+	"gocsvify/settings"
 )
 
 // --- helpers ---

@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"gocsvify/libs/xlslib"
+	"gocsvify/settings"
 	"os"
 	"path/filepath"
 	"strconv"
-	"xls_converter/libs/xlslib"
-	"xls_converter/settings"
 	// зависит от libxls
 )
 

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	convertSettings "xls_converter/settings"
-	"xls_converter/store"
+	convertSettings "gocsvify/settings"
+	"gocsvify/store"
 )
 
 // --- fake MessageStore ---
