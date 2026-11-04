@@ -100,3 +100,7 @@ go test -short ./...   # skips the slowest tests
 ## License
 
 MIT, see [`LICENSE`](LICENSE).
+
+## Acknowledgements
+
+Developed with the assistance of [Claude](https://claude.ai) by Anthropic.
