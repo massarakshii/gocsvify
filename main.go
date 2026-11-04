@@ -25,19 +25,19 @@ var daemonManager daemon.Manager
 func main() {
 	err := run()
 	if err != nil {
-		log.Fatalf("Ошибка при запуске сервиса: %v", err)
+		log.Fatalf("Service failed to start: %v", err)
 	}
 }
 
 func run() error {
-	fmt.Println("Сервис конвертации файлов запущен. Ожидаем файлы...")
-	env := flag.String("env", "prod", "Режим запуска (dev или prod)")
-	settingsPath := flag.String("settings_path", "", "Файл настроек")
+	fmt.Println("File conversion service started. Waiting for files...")
+	env := flag.String("env", "prod", "Run mode (dev or prod)")
+	settingsPath := flag.String("settings_path", "", "Path to the settings file")
 	flag.Parse()
 
 	settings, err := convertSettings.GetSettings(*settingsPath)
 	if err != nil {
-		return fmt.Errorf("ошибка при получении настроек: %v", err)
+		return fmt.Errorf("failed to get settings: %v", err)
 	}
 
 	var logLevel slog.Level
@@ -57,7 +57,7 @@ func run() error {
 	if settings.LogFile != "" {
 		file, err := os.OpenFile(settings.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
-			return fmt.Errorf("ошибка при открытии файла для логирования: %v", err)
+			return fmt.Errorf("failed to open log file: %v", err)
 		}
 		defer file.Close()
 		logger = slog.New(slog.NewJSONHandler(file, &slog.HandlerOptions{Level: logLevel}))
@@ -66,21 +66,21 @@ func run() error {
 	}
 	slog.SetDefault(logger)
 
-	slog.Info("Запуск приложения")
+	slog.Info("Starting application")
 
 	appDir, err := settings.GetPathApp(*env)
 	if err != nil {
-		return fmt.Errorf("ошибка при чтении настроек: %v", err)
+		return fmt.Errorf("failed to read settings: %v", err)
 	}
 	err = dirs.CreateDirs([]string{appDir})
 	if err != nil {
-		return fmt.Errorf("ошибка при создании директорий: %v", err)
+		return fmt.Errorf("failed to create directories: %v", err)
 	}
 	db, err := bbolt.Open(filepath.Join(appDir, "app.db"), 0600, &bbolt.Options{
 		Timeout: 2 * time.Second,
 	})
 	if err != nil {
-		return fmt.Errorf("ошибка при чтении бд: %v", err)
+		return fmt.Errorf("failed to open database: %v", err)
 	}
 	defer db.Close()
 
@@ -95,24 +95,24 @@ func run() error {
 	if settings.StartServer {
 		serverInstance, chanErr, err := server.StartServer(*settings, *env, ms, job, &daemonManager)
 		if err != nil {
-			slog.Error("Ошибка при запуске сервера", "error", err)
+			slog.Error("Failed to start server", "error", err)
 			errStop := daemonManager.Stop(stopTimeout)
 			if errStop != nil {
-				slog.Error("Ошибка при остановке демона", "error", errStop)
+				slog.Error("Failed to stop daemon", "error", errStop)
 			}
 			return err
 		}
 
 		select {
 		case err := <-chanErr:
-			slog.Error("Ошибка при работе сервера", "error", err)
+			slog.Error("Server error", "error", err)
 			errStop := daemonManager.Stop(stopTimeout)
 			if errStop != nil {
-				slog.Error("Ошибка при остановке демона", "error", errStop)
+				slog.Error("Failed to stop daemon", "error", errStop)
 			}
 			return err
 		case <-sigChan:
-			slog.Info("Получен сигнал остановки. Завершение работы скрипта")
+			slog.Info("Stop signal received. Shutting down")
 		}
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -120,29 +120,29 @@ func run() error {
 
 		// Очищаем ресурсы сервера и закрываем сетевой порт
 		if err := serverInstance.Shutdown(shutdownCtx); err != nil {
-			slog.Error("Ошибка при плавной остановке HTTP-сервера", "error", err)
+			slog.Error("Failed to shut down HTTP server gracefully", "error", err)
 		} else {
-			slog.Info("HTTP-сервер успешно и плавно остановлен.")
+			slog.Info("HTTP server shut down gracefully.")
 		}
 
 		errStop := daemonManager.Stop(stopTimeout)
 		if errStop != nil {
-			slog.Error("Ошибка при остановке демона", "error", errStop)
+			slog.Error("Failed to stop daemon", "error", errStop)
 		}
 	} else {
-		slog.Info("Запуск демона в автономном режиме")
-		slog.Debug("HTTP-сервер отключен в настройках. Демон работает в автономном режиме.")
-		slog.Debug("Для остановки нажмите Ctrl+C...")
+		slog.Info("Starting daemon in standalone mode")
+		slog.Debug("HTTP server is disabled in the settings. The daemon runs in standalone mode.")
+		slog.Debug("Press Ctrl+C to stop...")
 
 		select {
 		case <-sigChan:
-			slog.Info("Получен сигнал остановки. Завершение работы скрипта")
+			slog.Info("Stop signal received. Shutting down")
 			errStop := daemonManager.Stop(stopTimeout)
 			if errStop != nil {
-				slog.Error("Ошибка при остановке демона", "error", errStop)
+				slog.Error("Failed to stop daemon", "error", errStop)
 			}
 		case <-doneChan:
-			slog.Info("Демон завершил работу. Завершение работы скрипта")
+			slog.Info("Daemon finished. Shutting down")
 		}
 	}
 

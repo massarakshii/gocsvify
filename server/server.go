@@ -33,23 +33,23 @@ type FileResponse struct {
 }
 
 func StartServer(settings convertSettings.Settings, env string, ms store.MessageStore, job daemon.Job, daemonManager *daemon.Manager) (*http.Server, <-chan error, error) {
-	slog.Debug("Запуск сервера...")
+	slog.Debug("Starting server...")
 
 	inPath, err := settings.GetPathIn(env)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ошибка при получении пути к директории входа: %v", err)
+		return nil, nil, fmt.Errorf("failed to get input directory path: %v", err)
 	}
 	tmpPath, err := settings.GetPathTmp(env)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ошибка при получении пути к tmp директории: %v", err)
+		return nil, nil, fmt.Errorf("failed to get tmp directory path: %v", err)
 	}
 	outPath, err := settings.GetPathOut(env)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ошибка при получении пути к директории выхода: %v", err)
+		return nil, nil, fmt.Errorf("failed to get output directory path: %v", err)
 	}
 	archivesPath, err := settings.GetPathArchives(env)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ошибка при получении пути к директории архивов: %v", err)
+		return nil, nil, fmt.Errorf("failed to get archives directory path: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -60,7 +60,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if r.ContentLength > limit {
 			sendJson(w, http.StatusRequestEntityTooLarge, Response{
 				Success: false,
-				Message: "Размер файла превышает допустимый",
+				Message: "File size exceeds the allowed limit",
 			})
 			return
 		}
@@ -71,13 +71,13 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 				sendJson(w, http.StatusRequestEntityTooLarge, Response{
 					Success: false,
-					Message: fmt.Sprintf("Файл слишком большой, максимум %d МБ", settings.MaxUploadSize),
+					Message: fmt.Sprintf("File is too large, maximum is %d MB", settings.MaxUploadSize),
 				})
 				return
 			}
 			sendJson(w, http.StatusBadRequest, Response{
 				Success: false,
-				Message: "Ошибка при разборе формы",
+				Message: "Failed to parse the form",
 			})
 			return
 		}
@@ -86,7 +86,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if err != nil {
 			sendJson(w, http.StatusBadRequest, Response{
 				Success: false,
-				Message: "Ошибка при получении файла",
+				Message: "Failed to get the file",
 			})
 			return
 		}
@@ -96,7 +96,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if fileName == "" || fileName == "." || fileName == ".." || strings.Contains(fileName, "/") || strings.Contains(fileName, "\\") {
 			sendJson(w, http.StatusBadRequest, Response{
 				Success: false,
-				Message: "Неверное имя файла",
+				Message: "Invalid file name",
 			})
 			return
 		}
@@ -112,7 +112,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if !allowedExt[strings.ToLower(fileExt)] {
 			sendJson(w, http.StatusBadRequest, Response{
 				Success: false,
-				Message: "Неверное расширение файла",
+				Message: "Invalid file extension",
 			})
 			return
 		}
@@ -120,7 +120,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if err != nil {
 			sendJson(w, http.StatusUnprocessableEntity, Response{
 				Success: false,
-				Message: "Ошибка при создании сообщения",
+				Message: "Failed to create the message",
 			})
 			return
 		}
@@ -128,7 +128,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if err != nil {
 			sendJson(w, http.StatusUnprocessableEntity, Response{
 				Success: false,
-				Message: "Ошибка при сохранении сообщения",
+				Message: "Failed to save the message",
 			})
 			return
 		}
@@ -139,12 +139,12 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if err != nil {
 			errDelete := ms.DeleteMessage(message.Key)
 			if errDelete != nil {
-				slog.Error("Ошибка при удалении сообщения:", slog.Group("details", "error", errDelete))
+				slog.Error("Failed to delete the message:", slog.Group("details", "error", errDelete))
 			}
 
 			sendJson(w, http.StatusUnprocessableEntity, Response{
 				Success: false,
-				Message: "Ошибка при создании файла",
+				Message: "Failed to create the file",
 			})
 			return
 		}
@@ -153,19 +153,19 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if err != nil {
 			errClose := out.Close()
 			if errClose != nil {
-				slog.Error("Ошибка при закрытии файла:", slog.Group("details", "error", errClose))
+				slog.Error("Failed to close the file:", slog.Group("details", "error", errClose))
 			}
 			errRemove := os.Remove(tmpFilePath)
 			if errRemove != nil {
-				slog.Error("Ошибка при удалении временного файла:", slog.Group("details", "error", errRemove))
+				slog.Error("Failed to remove the temporary file:", slog.Group("details", "error", errRemove))
 			}
 			errDelete := ms.DeleteMessage(message.Key)
 			if errDelete != nil {
-				slog.Error("Ошибка при удалении сообщения:", slog.Group("details", "error", errDelete))
+				slog.Error("Failed to delete the message:", slog.Group("details", "error", errDelete))
 			}
 			sendJson(w, http.StatusUnprocessableEntity, Response{
 				Success: false,
-				Message: "Ошибка при записи файла",
+				Message: "Failed to write the file",
 			})
 			return
 		}
@@ -173,16 +173,16 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if errClose != nil {
 			errRemove := os.Remove(tmpFilePath)
 			if errRemove != nil {
-				slog.Error("Ошибка при удалении временного файла:", slog.Group("details", "error", errRemove))
+				slog.Error("Failed to remove the temporary file:", slog.Group("details", "error", errRemove))
 			}
 			errDelete := ms.DeleteMessage(message.Key)
 			if errDelete != nil {
-				slog.Error("Ошибка при удалении сообщения:", slog.Group("details", "error", errDelete))
+				slog.Error("Failed to delete the message:", slog.Group("details", "error", errDelete))
 			}
-			slog.Error("Ошибка при закрытии файла:", slog.Group("details", "error", errClose))
+			slog.Error("Failed to close the file:", slog.Group("details", "error", errClose))
 			sendJson(w, http.StatusUnprocessableEntity, Response{
 				Success: false,
-				Message: "Ошибка при закрытии файла",
+				Message: "Failed to close the file",
 			})
 			return
 		}
@@ -191,17 +191,17 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if err != nil {
 			errRemove := os.RemoveAll(tmpFilePath)
 			if errRemove != nil {
-				slog.Error("Ошибка при удалении временного файла:", slog.Group("details", "error", errRemove))
+				slog.Error("Failed to remove the temporary file:", slog.Group("details", "error", errRemove))
 			}
 			errDelete := ms.DeleteMessage(message.Key)
 			if errDelete != nil {
-				slog.Error("Ошибка при удалении сообщения:", slog.Group("details", "error", errDelete))
+				slog.Error("Failed to delete the message:", slog.Group("details", "error", errDelete))
 			}
-			slog.Error("Ошибка при переименовании файла:", slog.Group("details", "error", err))
+			slog.Error("Failed to rename the file:", slog.Group("details", "error", err))
 
 			sendJson(w, http.StatusUnprocessableEntity, Response{
 				Success: false,
-				Message: "Ошибка при сохранении файла",
+				Message: "Failed to save the file",
 			})
 			return
 		}
@@ -209,7 +209,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 
 		sendJson(w, http.StatusAccepted, Response{
 			Success: true,
-			Message: "Файл успешно загружен, ожидается обработка",
+			Message: "File uploaded successfully, waiting for processing",
 			Data: &FileResponse{
 				Filename: fileName,
 				FileKey:  message.Key,
@@ -223,24 +223,24 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if key == "" {
 			sendJson(w, http.StatusBadRequest, Response{
 				Success: false,
-				Message: "Параметр key не указан",
+				Message: "Parameter key is missing",
 			})
 			return
 		}
 		message, err := ms.GetMessage(key)
 		if err != nil {
-			slog.Error("Ошибка при поиске сообщения:", slog.Group("details", "error", err))
+			slog.Error("Failed to find the message:", slog.Group("details", "error", err))
 
 			sendJson(w, http.StatusInternalServerError, Response{
 				Success: false,
-				Message: "Ошибка при поиске сообщения",
+				Message: "Failed to find the message",
 			})
 			return
 		}
 		if message == nil {
 			sendJson(w, http.StatusNotFound, Response{
 				Success: false,
-				Message: "Сообщение не найдено",
+				Message: "Message not found",
 			})
 			return
 		}
@@ -263,7 +263,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if key == "" {
 			sendJson(w, http.StatusBadRequest, Response{
 				Success: false,
-				Message: "Параметр key не указан",
+				Message: "Parameter key is missing",
 			})
 			return
 		}
@@ -271,24 +271,24 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		if sheet != "" && !str.OnlyNum(sheet) {
 			sendJson(w, http.StatusBadRequest, Response{
 				Success: false,
-				Message: "Параметр sheet не является числом",
+				Message: "Parameter sheetNum is not a number",
 			})
 			return
 		}
 
 		message, err := ms.GetMessage(key)
 		if err != nil {
-			slog.Error("Ошибка при поиске сообщения:", slog.Group("details", "error", err))
+			slog.Error("Failed to find the message:", slog.Group("details", "error", err))
 			sendJson(w, http.StatusInternalServerError, Response{
 				Success: false,
-				Message: "Ошибка при поиске сообщения",
+				Message: "Failed to find the message",
 			})
 			return
 		}
 		if message == nil {
 			sendJson(w, http.StatusNotFound, Response{
 				Success: false,
-				Message: "Сообщение не найдено",
+				Message: "Message not found",
 			})
 			return
 		}
@@ -297,13 +297,13 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		case store.StatusNew, store.StatusProcessing:
 			sendJson(w, http.StatusUnprocessableEntity, Response{
 				Success: false,
-				Message: "Файл еще не обработан",
+				Message: "File has not been processed yet",
 			})
 			return
 		case store.StatusError:
 			sendJson(w, http.StatusUnprocessableEntity, Response{
 				Success: false,
-				Message: "При обработке файла произошла ошибка",
+				Message: "An error occurred while processing the file",
 			})
 			return
 		}
@@ -313,7 +313,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 			zipFileExt := ".zip"
 			tmpUuid, errGen := str.GenerateUUID()
 			if errGen != nil {
-				slog.Error("Ошибка при генерации UUID:", slog.Group("details", "error", errGen))
+				slog.Error("Failed to generate UUID:", slog.Group("details", "error", errGen))
 				tmpUuid = key
 			}
 			fileArchiveTmpPath := filepath.Join(tmpPath, tmpUuid+zipFileExt)
@@ -325,7 +325,7 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 				if zipErr != nil {
 					sendJson(w, http.StatusInternalServerError, Response{
 						Success: false,
-						Message: "Ошибка при создании архива",
+						Message: "Failed to create the archive",
 					})
 					return
 				}
@@ -334,11 +334,11 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 				if renameErr != nil {
 					removeErr := os.Remove(fileArchiveTmpPath)
 					if removeErr != nil {
-						slog.Error("Ошибка при удалении временного файла:", slog.Group("details", "error", removeErr))
+						slog.Error("Failed to remove the temporary file:", slog.Group("details", "error", removeErr))
 					}
 					sendJson(w, http.StatusInternalServerError, Response{
 						Success: false,
-						Message: "Ошибка при подготовке архива",
+						Message: "Failed to prepare the archive",
 					})
 					return
 				}
@@ -385,9 +385,9 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Debug("Сервер запущен на http://localhost:" + strconv.Itoa(settings.ServerPort))
+		slog.Debug("Server started on http://localhost:" + strconv.Itoa(settings.ServerPort))
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("Ошибка запуска сервера:", slog.Group("details", "error", err))
+			slog.Error("Failed to run the server:", slog.Group("details", "error", err))
 			errCh <- err
 		}
 		close(errCh)

@@ -20,7 +20,7 @@ func ZipFiles(zipFilePath string, filesPath string) (err error) {
 		}
 		if err != nil {
 			if removeErr := os.Remove(zipFilePath); removeErr != nil {
-				slog.Error("Ошибка при удалении архива:", slog.Group("details", "error", removeErr))
+				slog.Error("Failed to remove the archive:", slog.Group("details", "error", removeErr))
 			}
 		}
 	}()

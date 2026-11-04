@@ -37,45 +37,45 @@ func NewJob(env string, settings convertSettings.Settings, ms store.MessageStore
 func (j *Job) Run(ctx context.Context) error {
 	in, err := j.Settings.GetPathIn(j.Env)
 	if err != nil {
-		slog.Error("Ошибка при получении пути к директории входа:", slog.Group("details", "error", err))
+		slog.Error("Failed to get input directory path:", slog.Group("details", "error", err))
 
 		return err
 	}
 	out, err := j.Settings.GetPathOut(j.Env)
 	if err != nil {
-		slog.Error("Ошибка при получении пути к директории выхода:", slog.Group("details", "error", err))
+		slog.Error("Failed to get output directory path:", slog.Group("details", "error", err))
 		return err
 	}
 	history, err := j.Settings.GetPathHistory(j.Env)
 	if err != nil {
-		slog.Error("Ошибка при получении пути к директории истории:", slog.Group("details", "error", err))
+		slog.Error("Failed to get history directory path:", slog.Group("details", "error", err))
 		return err
 	}
 	tmp, err := j.Settings.GetPathTmp(j.Env)
 	if err != nil {
-		slog.Error("Ошибка при получении пути к директории временных файлов:", slog.Group("details", "error", err))
+		slog.Error("Failed to get temporary directory path:", slog.Group("details", "error", err))
 		return err
 	}
 	archives, err := j.Settings.GetPathArchives(j.Env)
 	if err != nil {
-		slog.Error("Ошибка при получении пути к директории архивов:", slog.Group("details", "error", err))
+		slog.Error("Failed to get archives directory path:", slog.Group("details", "error", err))
 		return err
 	}
 	failed, err := j.Settings.GetPathFailed(j.Env)
 	if err != nil {
-		slog.Error("Ошибка при получении пути к директории архивов:", slog.Group("details", "error", err))
+		slog.Error("Failed to get failed directory path:", slog.Group("details", "error", err))
 		return err
 	}
 
 	err = dirs.CreateDirs([]string{in, out, history, tmp, archives, failed})
 	if err != nil {
-		slog.Error("Ошибка при создании директорий:", slog.Group("details", "error", err))
+		slog.Error("Failed to create directories:", slog.Group("details", "error", err))
 		return err
 	}
 
 	startTime := time.Now()
 	for {
-		slog.Debug("ожидание файлов...")
+		slog.Debug("Waiting for files...")
 		if hasFiles, err := j.hasFiles(in); err == nil && hasFiles {
 			j.start(ctx, in, out, history, tmp, failed)
 			startTime = time.Now()
@@ -89,7 +89,7 @@ func (j *Job) Run(ctx context.Context) error {
 		idleTime := time.Since(startTime)
 		timeout := time.Duration(j.Settings.IdleTimeout)
 		if timeout != 0 && idleTime > timeout {
-			slog.Info("Превышено время ожидания. Останавливаем демона.")
+			slog.Info("Idle timeout exceeded. Stopping the daemon.")
 			break
 		}
 
@@ -107,7 +107,7 @@ func (j *Job) Run(ctx context.Context) error {
 func (j *Job) clearOld(dirPath string, lifeTime time.Duration) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
-		slog.Error("Ошибка чтения директории:", slog.Group("details", "error", err))
+		slog.Error("Failed to read directory:", slog.Group("details", "error", err))
 		return
 	}
 	for _, entry := range entries {
@@ -124,12 +124,12 @@ func (j *Job) clearOld(dirPath string, lifeTime time.Duration) {
 		if dirInfo.ModTime().Before(time.Now().Add(-lifeTime)) {
 			message, err := j.ms.GetMessage(entry.Name())
 			if err != nil {
-				slog.Info("Ошибка при поиске сообщения:", slog.Group("details", "error", err))
+				slog.Info("Failed to find the message:", slog.Group("details", "error", err))
 			}
 			if message != nil {
 				err = j.ms.DeleteMessage(message.Key)
 				if err != nil {
-					slog.Error("Ошибка удаления сообщения:", slog.Group("details", "error", err))
+					slog.Error("Failed to delete the message:", slog.Group("details", "error", err))
 				}
 			}
 			if dirInfo.IsDir() {
@@ -139,7 +139,7 @@ func (j *Job) clearOld(dirPath string, lifeTime time.Duration) {
 			}
 
 			if err != nil {
-				slog.Error("Ошибка удаления файла/директории:", slog.Group("details", "error", err))
+				slog.Error("Failed to remove file/directory:", slog.Group("details", "error", err))
 			}
 		}
 	}
@@ -166,7 +166,7 @@ func (j *Job) start(ctx context.Context, in string, out string, history string, 
 
 	entries, err := os.ReadDir(in)
 	if err != nil {
-		slog.Error("Ошибка чтения директории:", slog.Group("details", "error", err))
+		slog.Error("Failed to read directory:", slog.Group("details", "error", err))
 		return
 	}
 
@@ -204,10 +204,10 @@ func (j *Job) start(ctx context.Context, in string, out string, history string, 
 
 			message, err := j.ms.GetMessage(fileKey)
 			if err != nil {
-				slog.Error("Ошибка при поиске сообщения:", slog.Group("details", "error", err))
+				slog.Error("Failed to find the message:", slog.Group("details", "error", err))
 				errRename := os.Rename(fileP, failedP)
 				if errRename != nil {
-					slog.Error("Ошибка при перемещении файла в папку failed:", slog.Group("details", "error", errRename))
+					slog.Error("Failed to move the file to the failed folder:", slog.Group("details", "error", errRename))
 				}
 				continue
 			}
@@ -218,14 +218,14 @@ func (j *Job) start(ctx context.Context, in string, out string, history string, 
 				if err != nil {
 					errRename := os.Rename(fileP, failedP)
 					if errRename != nil {
-						slog.Error("Ошибка при перемещении файла в папку failed:", slog.Group("details", "error", errRename))
+						slog.Error("Failed to move the file to the failed folder:", slog.Group("details", "error", errRename))
 					}
 					slog.Error("failed to save message:", "error", err)
 					continue
 				}
 			}
 			if message.Status != store.StatusNew {
-				message.UpdateStatus(store.StatusNew, "Повторная обработка")
+				message.UpdateStatus(store.StatusNew, "Reprocessing")
 				message.Filename = fileName
 				errSave := j.ms.SaveMessage(message)
 				if errSave != nil {
@@ -249,9 +249,9 @@ func (j *Job) start(ctx context.Context, in string, out string, history string, 
 		if res.Error != nil {
 			err := os.Rename(res.Filepath, filepath.Join(failed, res.FileName))
 			if err != nil {
-				slog.Info("Ошибка при перемещении файла в папку с ошибками:", slog.Group("details", "error", err))
+				slog.Info("Failed to move the file to the failed folder:", slog.Group("details", "error", err))
 			}
-			slog.Error("Обработка файла завершилась ошибкой:", slog.Group(
+			slog.Error("File processing failed:", slog.Group(
 				"details",
 				"file", res.FileName,
 				"time", res.Time,
@@ -259,7 +259,7 @@ func (j *Job) start(ctx context.Context, in string, out string, history string, 
 			))
 			continue
 		}
-		slog.Debug("Обработан файл:", slog.Group(
+		slog.Debug("File processed:", slog.Group(
 			"details",
 			"file", res.FileName,
 			"time", res.Time,
@@ -297,7 +297,7 @@ func (j *Job) convert(ctx context.Context, tasks <-chan ConvertTask, results cha
 		task.message.UpdateStatus(store.StatusProcessing, "Converting file")
 		err := j.ms.SaveMessage(task.message)
 		if err != nil {
-			slog.Error("ошибка сохранения сообщения:", "error", err)
+			slog.Error("Failed to save the message:", "error", err)
 		}
 
 		logMsg, err := j.convertSafe(ctx, task, dirPathOut, DirPathHistory, tmpDir)
@@ -306,23 +306,23 @@ func (j *Job) convert(ctx context.Context, tasks <-chan ConvertTask, results cha
 			slog.Error(logMsg, "error", err)
 
 			if ctx.Err() != nil {
-				task.message.UpdateStatus(store.StatusNew, "Задача отменена, возвращаем статус new")
+				task.message.UpdateStatus(store.StatusNew, "Task canceled, status reset to new")
 				errMsg := j.ms.SaveMessage(task.message)
 				if errMsg != nil {
-					slog.Error("Ошибка при сохранении сообщения", "error", errMsg)
+					slog.Error("Failed to save the message", "error", errMsg)
 				}
 			} else {
-				task.message.UpdateStatus(store.StatusError, "Произошла ошибка при конвертации файла")
+				task.message.UpdateStatus(store.StatusError, "An error occurred while converting the file")
 				errMsg := j.ms.SaveMessage(task.message)
 				if errMsg != nil {
-					slog.Error("Ошибка при сохранении сообщения", "error", errMsg)
+					slog.Error("Failed to save the message", "error", errMsg)
 				}
 			}
 		} else {
-			task.message.UpdateStatus(store.StatusDone, "Файл успешно конвертирован")
+			task.message.UpdateStatus(store.StatusDone, "File converted successfully")
 			errMsg := j.ms.SaveMessage(task.message)
 			if errMsg != nil {
-				slog.Error("ошибка сохранения сообщения:", "error", errMsg)
+				slog.Error("Failed to save the message:", "error", errMsg)
 			}
 		}
 
@@ -342,9 +342,9 @@ func (j *Job) convert(ctx context.Context, tasks <-chan ConvertTask, results cha
 func (j *Job) convertSafe(ctx context.Context, task ConvertTask, dirPathOut string, DirPathHistory string, tmpDir string) (logMsg string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("ошибка конвертации:", "error", r)
+			slog.Error("Conversion error:", "error", r)
 			err = fmt.Errorf("panic: %v", r)
-			logMsg = "Паника при конвертации файла"
+			logMsg = "Panic while converting the file"
 		}
 	}()
 
@@ -366,7 +366,7 @@ func (j *Job) convertOne(ctx context.Context, task ConvertTask, dirPathOut strin
 
 	err = dirs.CreateDirs([]string{tmpPath})
 	if err != nil {
-		return "Произошла ошибка при создании директории", err
+		return "Failed to create the directory", err
 	}
 	defer os.RemoveAll(tmpPath)
 
@@ -381,28 +381,28 @@ func (j *Job) convertOne(ctx context.Context, task ConvertTask, dirPathOut strin
 	case ".accdb", ".mdb":
 		converterSync = accdb.NewConverter(taskCtx, task.filepath, &j.Settings)
 	default:
-		return "Неподдерживаемое расширение файла", fmt.Errorf("unsupported file extension: %s", ext)
+		return "Unsupported file extension", fmt.Errorf("unsupported file extension: %s", ext)
 	}
 
 	err = converterSync.Convert(tmpPath)
 	if err != nil {
-		return "Произошла ошибка при конвертации файла", err
+		return "An error occurred while converting the file", err
 	}
 
 	if err = os.RemoveAll(csvPath); err != nil {
-		return "Не удалось удалить предыдущий результат", err
+		return "Failed to remove the previous result", err
 	}
 
 	err = os.Rename(tmpPath, csvPath)
 	if err != nil {
-		return "Произошла ошибка при сохранении итогового файла", err
+		return "Failed to save the resulting file", err
 	}
 
 	historyPath := filepath.Join(DirPathHistory, task.fileName)
 	err = os.Rename(task.filepath, historyPath)
 	if err != nil {
-		return "Произошла ошибка при перемещении файла в историю", err
+		return "Failed to move the file to history", err
 	}
 
-	return "Успешная конвертация файла", nil
+	return "File converted successfully", nil
 }

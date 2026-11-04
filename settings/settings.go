@@ -77,23 +77,23 @@ func (s *Settings) validateSettings() error {
 		s.DirPathApp == "" ||
 		s.DirPathFailed == "" {
 
-		return errors.New("не все пути заданы")
+		return errors.New("not all paths are set")
 	}
 
 	if s.IdleTimeout < 0 || s.WriteTimeout < 0 || s.ReadTimeout < 0 || s.ReadHeadTimeout < 0 || s.LifeTime < 0 || s.LifeTimeHistory < 0 || s.Sleep < 0 {
-		return errors.New("некорректные значения таймаутов")
+		return errors.New("invalid timeout values")
 	}
 
 	if s.MaxUploadSize <= 0 {
-		return errors.New("некорректное значение максимального размера загружаемого файла")
+		return errors.New("invalid maximum upload size")
 	}
 
 	if s.Delimiter == "" {
-		return errors.New("не задан разделитель")
+		return errors.New("delimiter is not set")
 	}
 
 	if len(s.Delimiter) > 1 {
-		return errors.New("разделитель должен быть одиночным символом")
+		return errors.New("delimiter must be a single character")
 	}
 
 	return nil

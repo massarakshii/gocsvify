@@ -1358,10 +1358,10 @@ func TestConvertMalformedParts(t *testing.T) {
 		content    string
 		wantSubstr string
 	}{
-		{"malformed sharedStrings", "xl/sharedStrings.xml", `<sst><si><t>x</si></sst>`, "ошибка парсинга словаря строк"},
-		{"malformed styles", "xl/styles.xml", stylesHeader + `<numFmts><numFmt numFmtId="164" formatCode="x"/>`, "ошибка создания стилей"},
-		{"styles with non-numeric numFmtId", "xl/styles.xml", stylesHeader + `<numFmts><numFmt numFmtId="x"/></numFmts></styleSheet>`, "ошибка создания стилей"},
-		{"malformed sheet", "xl/worksheets/sheet1.xml", `<worksheet><sheetData><row><c r="A1"><v>1</v></c>`, "ошибка создания CSV"},
+		{"malformed sharedStrings", "xl/sharedStrings.xml", `<sst><si><t>x</si></sst>`, "failed to parse shared strings"},
+		{"malformed styles", "xl/styles.xml", stylesHeader + `<numFmts><numFmt numFmtId="164" formatCode="x"/>`, "failed to create styles"},
+		{"styles with non-numeric numFmtId", "xl/styles.xml", stylesHeader + `<numFmts><numFmt numFmtId="x"/></numFmts></styleSheet>`, "failed to create styles"},
+		{"malformed sheet", "xl/worksheets/sheet1.xml", `<worksheet><sheetData><row><c r="A1"><v>1</v></c>`, "failed to create CSV"},
 	}
 
 	for _, tt := range tests {
@@ -1423,7 +1423,7 @@ func TestConvertOutputDirectoryMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when the output directory does not exist")
 	}
-	if !strings.Contains(err.Error(), "ошибка создания CSV") {
+	if !strings.Contains(err.Error(), "failed to create CSV") {
 		t.Errorf("unexpected error text: %v", err)
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
@@ -1452,7 +1452,7 @@ func TestConvertContextCanceled(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected the error to wrap context.Canceled, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "ошибка создания CSV") {
+	if !strings.Contains(err.Error(), "failed to create CSV") {
 		t.Errorf("unexpected error text: %v", err)
 	}
 	if names := listDir(t, outDir); len(names) != 0 {
@@ -1476,7 +1476,7 @@ func TestConvertInvalidDelimiter(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error for an invalid csv delimiter")
 			}
-			if !strings.Contains(err.Error(), "ошибка создания CSV") {
+			if !strings.Contains(err.Error(), "failed to create CSV") {
 				t.Errorf("unexpected error text: %v", err)
 			}
 			if names := listDir(t, outDir); len(names) != 0 {
@@ -1533,7 +1533,7 @@ func TestConvertWorkbookParseError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for a malformed workbook.xml")
 	}
-	if !strings.Contains(err.Error(), "ошибка получения стартовой даты для форматирования") {
+	if !strings.Contains(err.Error(), "failed to get the date system for formatting") {
 		t.Errorf("unexpected error text: %v", err)
 	}
 	var syntaxErr *xml.SyntaxError

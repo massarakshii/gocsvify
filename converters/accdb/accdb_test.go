@@ -135,7 +135,7 @@ func TestConvertNorthwind(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(out)
 	if len(entries) != 20 {
-		t.Fatalf("got %d csv files, want 20 (по одному на таблицу)", len(entries))
+		t.Fatalf("got %d csv files, want 20 (one per table)", len(entries))
 	}
 	// Таблицы идут по алфавиту: 0 - Customers (29 строк + заголовок), 12 - Products (45 + заголовок).
 	for idx, wantLines := range map[int]int{0: 30, 12: 46} {

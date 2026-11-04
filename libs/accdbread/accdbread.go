@@ -150,7 +150,7 @@ var cp1252hi = [32]rune{
 }
 
 // ErrTableNotFound возвращается, если в базе нет таблицы с указанным именем.
-var ErrTableNotFound = errors.New("таблица не найдена")
+var ErrTableNotFound = errors.New("table not found")
 
 // GetTables возвращает пользовательские таблицы базы (без системных), отсортированные по имени.
 // У таблицы, описание которой не удалось прочитать, заполнено поле Err.
@@ -285,14 +285,14 @@ func Open(path string, cpOverride int) (*DB, error) {
 	if n, err := f.ReadAt(hdr, 0); n < len(hdr) {
 		f.Close()
 		if err == nil || err == io.EOF {
-			err = errors.New("файл слишком короткий")
+			err = errors.New("file is too short")
 		}
 		return nil, err
 	}
 	sig := string(hdr[4:19])
 	if hdr[0] != 0 || hdr[1] != 1 || (sig != "Standard Jet DB" && sig != "Standard ACE DB") {
 		f.Close()
-		return nil, errors.New("это не файл Microsoft Access (.mdb/.accdb)")
+		return nil, errors.New("not a Microsoft Access file (.mdb/.accdb)")
 	}
 	// Версия формата: 0 — Jet3 (Access 97), 1 — Jet4 (2000–2003), 2 — ACE 2007,
 	// 3 — ACE 2010 и новее. Старшие байты слова у новых версий (0x0103, 0x0603 …)
@@ -306,7 +306,7 @@ func Open(path string, cpOverride int) (*DB, error) {
 		db.fi = jet4Fmt
 	default:
 		f.Close()
-		return nil, fmt.Errorf("неизвестная версия формата: 0x%X", ver)
+		return nil, fmt.Errorf("unknown format version: 0x%X", ver)
 	}
 	// Заголовок (с 0x18) зашифрован RC4 с постоянным ключом 0x6b39dac7.
 	n := 128
@@ -328,7 +328,7 @@ func (db *DB) Close() error { return db.f.Close() }
 
 func (db *DB) page(n uint32) ([]byte, error) {
 	if int64(n) >= db.numPages {
-		return nil, fmt.Errorf("страница %d за пределами файла", n)
+		return nil, fmt.Errorf("page %d is outside the file", n)
 	}
 	buf := make([]byte, db.fi.pageSize)
 	if _, err := db.f.ReadAt(buf, int64(n)*int64(db.fi.pageSize)); err != nil {
@@ -372,7 +372,7 @@ func (db *DB) rowAt(ptr uint32) ([]byte, error) {
 	sl := db.slots(pg)
 	r := int(ptr & 0xFF)
 	if r >= len(sl) || !sl[r].ok {
-		return nil, fmt.Errorf("нет строки %d на странице %d", r, ptr>>8)
+		return nil, fmt.Errorf("no row %d on page %d", r, ptr>>8)
 	}
 	return pg[sl[r].start:sl[r].end], nil
 }
@@ -385,7 +385,7 @@ func (db *DB) loadTable(pgNo uint32) (*Table, error) {
 		return nil, err
 	}
 	if pg[0] != 0x02 {
-		return nil, fmt.Errorf("страница %d не является описанием таблицы (тип 0x%02X)", pgNo, pg[0])
+		return nil, fmt.Errorf("page %d is not a table definition (type 0x%02X)", pgNo, pg[0])
 	}
 	buf := append([]byte(nil), pg...)
 	next := le32(pg[4:])
@@ -399,7 +399,7 @@ func (db *DB) loadTable(pgNo uint32) (*Table, error) {
 	}
 	fi := db.fi
 	if len(buf) < fi.colsStartOff {
-		return nil, errors.New("слишком короткое описание таблицы")
+		return nil, errors.New("table definition is too short")
 	}
 	t := &Table{TdefPage: pgNo}
 	t.RowCount = int(le32(buf[fi.numRowsOff:]))
@@ -408,13 +408,13 @@ func (db *DB) loadTable(pgNo uint32) (*Table, error) {
 	numRidx := int(le32(buf[fi.numRidxOff:]))
 	t.usage = le32(buf[fi.usageMapOff:])
 	if numCols <= 0 || numCols > 4096 || numRidx < 0 || numRidx > 4096 {
-		return nil, errors.New("некорректное описание таблицы (шифрование или повреждение?)")
+		return nil, errors.New("invalid table definition (encryption or corruption?)")
 	}
 	cur := fi.colsStartOff + fi.ridxEntrySize*numRidx
 	cols := make([]*Column, 0, numCols)
 	for i := 0; i < numCols; i++ {
 		if cur+fi.colEntrySize > len(buf) {
-			return nil, errors.New("описание колонок выходит за пределы")
+			return nil, errors.New("column definitions are out of bounds")
 		}
 		e := buf[cur : cur+fi.colEntrySize]
 		cols = append(cols, &Column{
@@ -434,19 +434,19 @@ func (db *DB) loadTable(pgNo uint32) (*Table, error) {
 		var n int
 		if fi.jet4 {
 			if cur+2 > len(buf) {
-				return nil, errors.New("имена колонок выходят за пределы")
+				return nil, errors.New("column names are out of bounds")
 			}
 			n = int(le16(buf[cur:]))
 			cur += 2
 		} else {
 			if cur+1 > len(buf) {
-				return nil, errors.New("имена колонок выходят за пределы")
+				return nil, errors.New("column names are out of bounds")
 			}
 			n = int(buf[cur])
 			cur++
 		}
 		if cur+n > len(buf) {
-			return nil, errors.New("имя колонки выходит за пределы")
+			return nil, errors.New("column name is out of bounds")
 		}
 		c.Name = db.decodeText(buf[cur : cur+n])
 		cur += n
@@ -464,7 +464,7 @@ func (db *DB) usagePages(ptr uint32) ([]uint32, error) {
 		return nil, err
 	}
 	if len(buf) < 5 {
-		return nil, errors.New("слишком короткая карта страниц")
+		return nil, errors.New("usage map is too short")
 	}
 	var pages []uint32
 	switch buf[0] {
@@ -500,7 +500,7 @@ func (db *DB) usagePages(ptr uint32) ([]uint32, error) {
 			}
 		}
 	default:
-		return nil, fmt.Errorf("неизвестный тип карты страниц %d", buf[0])
+		return nil, fmt.Errorf("unknown usage map type %d", buf[0])
 	}
 	return pages, nil
 }
@@ -586,7 +586,7 @@ func (db *DB) ForEachRow(t *Table, fn func([]any) error) error {
 func (db *DB) decodeRow(t *Table, row []byte) (vals []any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			vals, err = nil, fmt.Errorf("повреждённая строка: %v", r)
+			vals, err = nil, fmt.Errorf("corrupted row: %v", r)
 		}
 	}()
 	fi := db.fi
@@ -599,7 +599,7 @@ func (db *DB) decodeRow(t *Table, row []byte) (vals []any, err error) {
 	}
 	nmask := (colCount + 7) / 8
 	if n < fi.rowColsSize+nmask+1 {
-		return nil, errors.New("строка слишком короткая")
+		return nil, errors.New("row is too short")
 	}
 	mask := row[n-nmask:]
 
@@ -614,7 +614,7 @@ func (db *DB) decodeRow(t *Table, row []byte) (vals []any, err error) {
 		for i := 0; i <= varCount; i++ {
 			p := n - nmask - 4 - 2*i
 			if p < 0 {
-				return nil, errors.New("таблица смещений за пределами строки")
+				return nil, errors.New("offset table is outside the row")
 			}
 			varOff[i] = int(le16(row[p:]))
 		}
@@ -632,7 +632,7 @@ func (db *DB) decodeRow(t *Table, row []byte) (vals []any, err error) {
 				jumpsUsed++
 			}
 			if colPtr-i < 0 {
-				return nil, errors.New("таблица смещений за пределами строки")
+				return nil, errors.New("offset table is outside the row")
 			}
 			varOff[i] = int(row[colPtr-i]) + jumpsUsed*256
 		}
@@ -809,7 +809,7 @@ func (db *DB) readLval(raw []byte) ([]byte, error) {
 		return nil, nil
 	}
 	if len(raw) < 12 {
-		return nil, errors.New("короткий заголовок LVAL")
+		return nil, errors.New("LVAL header is too short")
 	}
 	hdr := le32(raw)
 	length := int(hdr & 0x3FFFFFFF)
@@ -851,7 +851,7 @@ func (db *DB) readLval(raw []byte) ([]byte, error) {
 func (db *DB) Tables(includeSys bool) ([]*Table, error) {
 	cat, err := db.loadTable(2)
 	if err != nil {
-		return nil, fmt.Errorf("не удалось прочитать системный каталог (файл зашифрован, защищён или повреждён?): %w", err)
+		return nil, fmt.Errorf("failed to read the system catalog (file is encrypted, protected or corrupted?): %w", err)
 	}
 	cat.Name = "MSysObjects"
 	idx := map[string]int{}
@@ -860,7 +860,7 @@ func (db *DB) Tables(includeSys bool) ([]*Table, error) {
 	}
 	for _, k := range []string{"id", "name", "type", "flags"} {
 		if _, ok := idx[k]; !ok {
-			return nil, fmt.Errorf("в каталоге нет колонки %q", k)
+			return nil, fmt.Errorf("column %q not found in the catalog", k)
 		}
 	}
 	var res []*Table
@@ -925,7 +925,7 @@ func fmtVal(v any) string {
 
 func dumpCSV(db *DB, t *Table, w io.Writer, delim rune, limit int) error {
 	if t.Err != nil {
-		return fmt.Errorf("таблица %q: %w", t.Name, t.Err)
+		return fmt.Errorf("table %q: %w", t.Name, t.Err)
 	}
 	cw := csv.NewWriter(w)
 	cw.Comma = delim

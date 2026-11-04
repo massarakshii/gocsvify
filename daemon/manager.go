@@ -34,7 +34,7 @@ func (dm *Manager) StartIfNotRunning(job Job) <-chan struct{} {
 		defer cancel()
 		err := job.Run(ctx)
 		if err != nil {
-			slog.Error("Критическая ошибка при выполнении задачи, остановка воркера:", slog.Group("details", "error", err))
+			slog.Error("Critical error while running the job, stopping the worker:", slog.Group("details", "error", err))
 		}
 
 		dm.mu.Lock()
@@ -61,6 +61,6 @@ func (dm *Manager) Stop(timeout time.Duration) error {
 	case <-done:
 		return nil
 	case <-time.After(timeout):
-		return fmt.Errorf("демон не остановился за %s", timeout)
+		return fmt.Errorf("daemon did not stop within %s", timeout)
 	}
 }

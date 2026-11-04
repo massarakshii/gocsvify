@@ -80,32 +80,32 @@ func (u *Converter) Convert(csvPath string) error {
 		if f.Name == "xl/sharedStrings.xml" {
 			sharedStrings, err = u.parseSharedStrings(f)
 			if err != nil {
-				return fmt.Errorf("ошибка парсинга словаря строк: %w", err)
+				return fmt.Errorf("failed to parse shared strings: %w", err)
 			}
 		}
 		if f.Name == "xl/workbook.xml" {
 			u.StartDate, err = u.getStartDate(f)
 			if err != nil {
-				return fmt.Errorf("ошибка получения стартовой даты для форматирования: %w", err)
+				return fmt.Errorf("failed to get the date system for formatting: %w", err)
 			}
 		}
 		if f.Name == "xl/styles.xml" {
 			xlsxStyler, err = NewXlsxStyler(f)
 			if err != nil {
-				return fmt.Errorf("ошибка создания стилей: %w", err)
+				return fmt.Errorf("failed to create styles: %w", err)
 			}
 		}
 		if f.Name == "xl/_rels/workbook.xml.rels" {
 			sheetsRelation, err = u.getSheetsRelation(f)
 			if err != nil {
-				return fmt.Errorf("ошибка получения списка листов: %w", err)
+				return fmt.Errorf("failed to get the sheet list: %w", err)
 			}
 		}
 		if f.Name == "xl/workbook.xml" {
 			hasWorkbook = true
 			sheets, err = u.getSheets(f, u.Settings.WithHidden)
 			if err != nil {
-				return fmt.Errorf("ошибка получения списка листов: %w", err)
+				return fmt.Errorf("failed to get the sheet list: %w", err)
 			}
 		}
 
@@ -124,7 +124,7 @@ func (u *Converter) Convert(csvPath string) error {
 			}
 			err = u.saveSheet(sheetFiles[sheetFullName], i, sharedStrings, xlsxStyler, csvPath)
 			if err != nil {
-				return fmt.Errorf("ошибка создания CSV: %w", err)
+				return fmt.Errorf("failed to create CSV: %w", err)
 			}
 			delete(sheetFiles, sheetFullName)
 			i++
@@ -153,7 +153,7 @@ func (u *Converter) Convert(csvPath string) error {
 		for _, sheetName := range names {
 			err = u.saveSheet(sheetFiles[sheetName], i, sharedStrings, xlsxStyler, csvPath)
 			if err != nil {
-				return fmt.Errorf("ошибка создания CSV: %w", err)
+				return fmt.Errorf("failed to create CSV: %w", err)
 			}
 			i++
 		}
@@ -184,7 +184,7 @@ func (u *Converter) saveSheet(sheetFile *zip.File, sheetNum int, sharedStrings [
 	if err != nil {
 		errRemove := os.Remove(outFile.Name())
 		if errRemove != nil {
-			slog.Error("ошибка удаления файла", "err", errRemove)
+			slog.Error("failed to remove file", "err", errRemove)
 		}
 		return err
 	}

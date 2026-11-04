@@ -453,7 +453,7 @@ func TestNorthwindCorruptedDoesNotPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	if testing.Short() {
-		t.Skip("долгий тест (читает 3.6 МБ базу десятки раз)")
+		t.Skip("slow test (reads the 3.6 MB database dozens of times)")
 	}
 	rng := rand.New(rand.NewSource(11))
 	for i := 0; i < 20; i++ {

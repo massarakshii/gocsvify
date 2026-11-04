@@ -443,7 +443,7 @@ func TestUploadTooLargeChunked(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status %d, %+v; want 413", resp.StatusCode, r)
 	}
-	if !strings.Contains(r.Message, "1 МБ") {
+	if !strings.Contains(r.Message, "1 MB") {
 		t.Errorf("message = %q, want the limit in MB", r.Message)
 	}
 	if e.ms.count() != 0 || len(dirNames(t, e.in)) != 0 {
@@ -622,9 +622,9 @@ func TestDownloadNotReadyStatuses(t *testing.T) {
 	e := setup(t, nil)
 
 	cases := map[string]string{
-		store.StatusNew:        "Файл еще не обработан",
-		store.StatusProcessing: "Файл еще не обработан",
-		store.StatusError:      "При обработке файла произошла ошибка",
+		store.StatusNew:        "File has not been processed yet",
+		store.StatusProcessing: "File has not been processed yet",
+		store.StatusError:      "An error occurred while processing the file",
 	}
 	for status, wantMsg := range cases {
 		e.ms.msgs["k-"+status] = store.Message{Key: "k-" + status, Filename: "a.xlsx", Status: status}
