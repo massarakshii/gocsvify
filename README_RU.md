@@ -35,6 +35,18 @@ go build -o gocsvify .
 
 Остановка: `Ctrl+C` или `SIGTERM`. Сервис дорабатывает текущие файлы (до 30 с), недоделанные остаются во входной папке.
 
+```bash
+# запустить в докер-образе (в режиме сервера)
+docker run -d --name gocsvify \
+  -p 127.0.0.1:8080:8080 \
+  -v gocsvify_data:/data \
+  ghcr.io/massarakshii/gocsvify:latest
+
+# или собрать локально
+docker build -t gocsvify:dev .
+docker compose up -d
+```
+
 ## Автономный режим
 
 Положите файл в папку `in`. Результат появится в `out/<имя файла без расширения>/0.csv`, `1.csv`, … Исходник переедет в `history`, а при ошибке в `failed`. Если файлов нет дольше `idleTimeout`, демон завершается.

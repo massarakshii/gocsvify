@@ -35,6 +35,22 @@ On the first run without `-settings_path`, a `settings.json` with default values
 
 Stop with `Ctrl+C` or `SIGTERM`. The service finishes the files it is working on (up to 30 s); unfinished files stay in the input folder.
 
+## Docker
+
+```bash
+# run the published image (server mode)
+docker run -d --name gocsvify \
+  -p 127.0.0.1:8080:8080 \
+  -v gocsvify_data:/data \
+  ghcr.io/massarakshii/gocsvify:latest
+
+# or build locally
+docker build -t gocsvify:dev .
+docker compose up -d
+```
+
+The image reads its settings from `/etc/gocsvify/settings.json`; mount your own file there to override them. Data is stored in the `/data` volume.
+
 ## Standalone mode
 
 Put a file into the `in` folder. The result appears in `out/<file name without extension>/0.csv`, `1.csv`, … The source file is moved to `history`, or to `failed` if the conversion fails. If there are no files for longer than `idleTimeout`, the daemon exits.

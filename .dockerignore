@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+.DS_Store
+.zsh_history
+.zshrc.local
+.env
+*.test
+*.out
+dist
+gocsvify
+gocsvify_data
+local_storage
+/settings.json

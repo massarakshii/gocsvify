@@ -44,3 +44,4 @@ EOF
 /gocsvify
 .zsh_history
 .zshrc.local
+/local_storage

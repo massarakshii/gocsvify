@@ -1,0 +1,18 @@
+services:
+  gocsvify:
+    build: .
+    image: gocsvify:latest
+    restart: unless-stopped
+    ports:
+      # The API has no authentication: publish it on localhost only and put a reverse proxy
+      # with authentication in front of it. Use "8080:8080" to expose it on all interfaces.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - gocsvify-data:/data
+      # To use your own settings (paths must stay under /data, isAbsPath: true):
+      # - ./my-settings.json:/etc/gocsvify/settings.json:ro
+    # The daemon waits for running conversions (up to 30 s) after SIGTERM.
+    stop_grace_period: 40s
+
+volumes:
+  gocsvify-data:
