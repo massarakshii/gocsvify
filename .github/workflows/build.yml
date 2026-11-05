@@ -87,6 +87,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: gocsvify_*
           path: artifacts
           merge-multiple: true
       - name: Checksums
@@ -106,6 +107,7 @@ jobs:
       packages: write
     env:
       PUSH: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      DOCKER_BUILD_RECORD_UPLOAD: false
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
