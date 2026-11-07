@@ -28,6 +28,7 @@ type Settings struct {
 	WithHidden      bool        `json:"withHidden"`
 	StartServer     bool        `json:"startServer"`
 	ServerPort      int         `json:"serverPort"`
+	AuthToken       string      `json:"authToken"`
 	WriteTimeout    ct.Duration `json:"writeTimeout"`
 	ReadTimeout     ct.Duration `json:"readTimeout"`
 	ReadHeadTimeout ct.Duration `json:"readHeadTimeout"`
@@ -191,6 +192,7 @@ func getDefaultSettings() Settings {
 		WithHidden:      false,
 		StartServer:     false,
 		ServerPort:      8080,
+		AuthToken:       "",
 		WriteTimeout:    0,
 		ReadTimeout:     ct.Duration(600 * time.Second),
 		ReadHeadTimeout: ct.Duration(30 * time.Second),

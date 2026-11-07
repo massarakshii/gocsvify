@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -375,9 +377,15 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 		http.ServeFile(w, r, filePath)
 	})
 
+	token := resolveAuthToken(settings)
+	if token == "" {
+		slog.Warn("Authorization is disabled: set GOCSVIFY_AUTH_TOKEN or authToken in the settings")
+	}
+	handler := AuthMiddleware(mux, token)
+
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", settings.ServerPort),
-		Handler:           mux,
+		Handler:           handler,
 		ReadTimeout:       time.Duration(settings.ReadTimeout),
 		ReadHeaderTimeout: time.Duration(settings.ReadHeadTimeout),
 		WriteTimeout:      time.Duration(settings.WriteTimeout),
@@ -394,6 +402,37 @@ func StartServer(settings convertSettings.Settings, env string, ms store.Message
 	}()
 
 	return server, errCh, nil
+}
+
+func resolveAuthToken(settings convertSettings.Settings) string {
+	if token := strings.TrimSpace(os.Getenv("GOCSVIFY_AUTH_TOKEN")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(settings.AuthToken)
+}
+
+func AuthMiddleware(h http.Handler, token string) http.Handler {
+	if token == "" {
+		return h
+	}
+	want := sha256.Sum256([]byte(token))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scheme, got, found := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
+		if found && strings.EqualFold(scheme, "Bearer") {
+			have := sha256.Sum256([]byte(strings.TrimSpace(got)))
+			if subtle.ConstantTimeCompare(have[:], want[:]) == 1 {
+				h.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		w.Header().Set("WWW-Authenticate", `Bearer realm="gocsvify"`)
+		sendJson(w, http.StatusUnauthorized, Response{
+			Success: false,
+			Message: "Unauthorized",
+		})
+	})
 }
 
 func sendJson(w http.ResponseWriter, status int, r Response) {

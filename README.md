@@ -49,7 +49,7 @@ docker build -t gocsvify:dev .
 docker compose up -d
 ```
 
-The image reads its settings from `/etc/gocsvify/settings.json`; mount your own file there to override them. Data is stored in the `/data` volume.
+The image reads its settings from `/etc/gocsvify/settings.json`; mount your own file there to override them. Data is stored in the `/data` volume. To enable authorization, pass the token with `-e GOCSVIFY_AUTH_TOKEN=<token>` (or via `environment:` in `docker-compose.yml`).
 
 ## Standalone mode
 
@@ -71,7 +71,7 @@ curl -OJ "http://localhost:8080/download?key=<fileKey>"
 curl -OJ "http://localhost:8080/download?key=<fileKey>&sheetNum=0"
 ```
 
-Main status codes: `202` file accepted, `413` file larger than `maxUploadSize`, `422` file not processed yet or the conversion failed, `404` key not found. The API has no authentication, so put a reverse proxy in front of it.
+Main status codes: `202` file accepted, `413` file larger than `maxUploadSize`, `422` file not processed yet or the conversion failed, `404` key not found, `401` missing or wrong token (only when authorization is enabled). The API can be protected with a Bearer token (`Authorization: Bearer <token>`); see [`doc.md`](doc.md#security) for details.
 
 ## Settings (`settings.json`)
 
@@ -95,6 +95,7 @@ Missing keys fall back to the default values. Durations are either a Go duration
 | `withHidden` | `false` | Convert hidden xlsx sheets |
 | `startServer` | `false` | Enable the HTTP server |
 | `serverPort` | `8080` | Server port |
+| `authToken` | empty | HTTP Bearer token (empty: no authorization). The `GOCSVIFY_AUTH_TOKEN` environment variable takes priority |
 | `readTimeout` | `600s` | Request read timeout |
 | `readHeadTimeout` | `30s` | Request header read timeout |
 | `writeTimeout` | `0` | Response write timeout (`0`: no limit) |

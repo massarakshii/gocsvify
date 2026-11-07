@@ -35,8 +35,10 @@ go build -o gocsvify .
 
 Остановка: `Ctrl+C` или `SIGTERM`. Сервис дорабатывает текущие файлы (до 30 с), недоделанные остаются во входной папке.
 
+## Docker
+
 ```bash
-# запустить в докер-образе (в режиме сервера)
+# запустить опубликованный образ (серверный режим)
 docker run -d --name gocsvify \
   -p 127.0.0.1:8080:8080 \
   -v gocsvify_data:/data \
@@ -46,6 +48,8 @@ docker run -d --name gocsvify \
 docker build -t gocsvify:dev .
 docker compose up -d
 ```
+
+Образ читает настройки из `/etc/gocsvify/settings.json`; чтобы переопределить их, смонтируйте туда свой файл. Данные хранятся в томе `/data`. Чтобы включить авторизацию, передайте токен через `-e GOCSVIFY_AUTH_TOKEN=<токен>` (или через `environment:` в `docker-compose.yml`).
 
 ## Автономный режим
 
@@ -67,7 +71,7 @@ curl -OJ "http://localhost:8080/download?key=<fileKey>"
 curl -OJ "http://localhost:8080/download?key=<fileKey>&sheetNum=0"
 ```
 
-Основные коды: `202` файл принят, `413` файл больше `maxUploadSize`, `422` файл ещё не обработан или конвертация завершилась ошибкой, `404` ключ не найден. У API нет авторизации, поэтому ставьте перед ним прокси.
+Основные коды: `202` файл принят, `413` файл больше `maxUploadSize`, `422` файл ещё не обработан или конвертация завершилась ошибкой, `404` ключ не найден, `401` токен не передан или неверен (только при включённой авторизации). API можно защитить Bearer-токеном (`Authorization: Bearer <токен>`), подробнее в [`doc_ru.md`](doc_ru.md#безопасность).
 
 ## Настройки (`settings.json`)
 
@@ -91,6 +95,7 @@ curl -OJ "http://localhost:8080/download?key=<fileKey>&sheetNum=0"
 | `withHidden` | `false` | Конвертировать скрытые листы xlsx |
 | `startServer` | `false` | Включить HTTP-сервер |
 | `serverPort` | `8080` | Порт сервера |
+| `authToken` | пусто | HTTP Bearer токен (пусто: без авторизации). Переменная окружения `GOCSVIFY_AUTH_TOKEN` приоритетнее |
 | `readTimeout` | `600s` | Таймаут чтения запроса |
 | `readHeadTimeout` | `30s` | Таймаут чтения заголовков |
 | `writeTimeout` | `0` | Таймаут записи ответа (`0`: без ограничения) |

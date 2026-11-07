@@ -16,6 +16,7 @@ License: MIT, see [`LICENSE`](LICENSE)
 - **Resilience**: a panic while processing one file does not kill the worker; a broken file goes to `failed` and the rest keep being processed
 - **Graceful shutdown**: on SIGINT/SIGTERM the daemon waits for running tasks to finish (up to 30 s)
 - **JSON configuration**: paths, timeouts, upload limit, delimiter, etc.
+- **Optional authorization**: a Bearer token for the HTTP API
 
 ## Architecture
 
@@ -89,7 +90,7 @@ gocsvify/
 ├── daemon/
 │   ├── job.go               # Job interface
 │   └── manager.go           # Daemon start/stop
-├── server/server.go         # HTTP API
+├── server/server.go         # HTTP API, authorization
 ├── store/                   # Message and the MessageStore interface
 ├── settings/settings.go     # Settings
 ├── zipper/                  # Packing results into ZIP
@@ -99,6 +100,11 @@ gocsvify/
 │   ├── configTime/          # Duration for JSON ("10s" or seconds)
 │   ├── dirs/                # Directory creation
 │   └── str/                 # UUID, numeric string check
+├── Dockerfile               # Image build (multi-stage, distroless)
+├── docker-compose.yml       # Running the service in Docker
+├── docker/settings.json     # Settings baked into the image
+├── scripts/collect-licenses.sh  # Third-party license collection
+├── .github/workflows/build.yml  # CI: tests, multi-platform builds, release, image
 ├── settings.json
 └── <appDir>/                # Working data (in/out/history/archives/failed/tmp, app.db)
 ```
@@ -160,6 +166,7 @@ JSON does not support comments; the example below is plain JSON.
   "withHidden": false,
   "startServer": true,
   "serverPort": 8080,
+  "authToken": "",
   "writeTimeout": 0,
   "readTimeout": "600s",
   "readHeadTimeout": "30s",
@@ -183,6 +190,7 @@ JSON does not support comments; the example below is plain JSON.
 | `delimiter` | CSV delimiter, a single one-byte character |
 | `withHidden` | Convert hidden xlsx sheets |
 | `startServer`, `serverPort` | HTTP server and its port |
+| `authToken` | HTTP Bearer token; empty means no authorization. The `GOCSVIFY_AUTH_TOKEN` environment variable takes priority (see [Security](#security)) |
 | `readTimeout`, `readHeadTimeout`, `writeTimeout` | HTTP server timeouts; `0` means no limit |
 | `maxUploadSize` | Maximum upload size in **MB** (must be > 0) |
 | `logLevel`, `logFile` | Level (`debug`/`info`/`warn`/`error`) and log file (empty means stdout), JSON format |
@@ -217,6 +225,7 @@ Success is `202 Accepted`:
 |------|------|
 | 202 | File accepted |
 | 400 | Malformed form, missing `file` field, invalid name or extension |
+| 401 | Authorization is enabled and the token is missing or wrong |
 | 405 | Method is not `POST` |
 | 413 | Size exceeds `maxUploadSize` (checked both by `Content-Length` and while streaming) |
 | 422 | The message or file could not be saved (the created message is rolled back) |
@@ -242,7 +251,7 @@ Success is `202 Accepted`:
 | `error` | Conversion failed |
 | `done` | Finished |
 
-Codes: `200`, `400` (no `key`), `404` (unknown key), `500` (store error).
+Codes: `200`, `400` (no `key`), `401` (authorization is enabled and the token is missing or wrong), `404` (unknown key), `500` (store error).
 
 ### 3. Download: `GET /download?key={key}[&sheetNum={N}]`
 
@@ -257,6 +266,7 @@ Download file name: `<original name without extension>.zip` or `<name>_<N>.csv`.
 |------|------|
 | 200 | File returned |
 | 400 | No `key`, or `sheetNum` is not a number |
+| 401 | Authorization is enabled and the token is missing or wrong |
 | 404 | Key or sheet not found |
 | 422 | File not processed yet (`new`/`processing`) or processing failed (`error`) |
 | 500 | Store or archive error (for example, the result has already been removed by cleanup) |
@@ -306,17 +316,86 @@ Re-uploading a file with the same key (standalone mode) resets the status to `ne
 
 ## Security
 
-Already implemented:
-- upload size limit `maxUploadSize` (checked by `Content-Length` and `http.MaxBytesReader`);
-- file extension and name validation, any path in the name is discarded;
-- HTTP server read/write timeouts;
-- the XLS parser guards against bogus sizes in headers; the XLS and Access parsers are robust against corrupted files (verified by tests with random corruption);
-- `sheetNum` accepts digits only, and the key is looked up in the store instead of being used in a path directly.
+### Built in
 
-Recommended:
-1. Run the service in a container or under a user with minimal privileges.
-2. Put a reverse proxy with authentication in front of the service: the API has no authorization.
-3. Limit the number of concurrent uploads at the proxy level.
+- upload size limit `maxUploadSize` (checked against `Content-Length` and with `http.MaxBytesReader`);
+- the file extension and name are validated, any path in the name is discarded;
+- read/write timeouts of the HTTP server;
+- the XLS parser is protected against bogus sizes in headers, and the XLS and Access parsers are resilient to corrupted files (verified by tests with random corruption);
+- `sheetNum` accepts digits only, and the key is looked up in the store instead of being put into a path directly;
+- optional token authorization (see below): the token is compared in constant time, and requests without it are rejected before the upload body is read.
+
+### Authorization
+
+By default the API is open. To protect it, set a token: every request must then carry the header `Authorization: Bearer <token>`.
+
+The token is taken from the `GOCSVIFY_AUTH_TOKEN` environment variable; if it is empty, from the `authToken` key in `settings.json`. The environment variable has priority and is the better choice for containers and CI, because the token does not end up in a file. Leading and trailing whitespace is ignored. An empty token disables authorization (a warning is written to the log at startup).
+
+```bash
+export GOCSVIFY_AUTH_TOKEN="$(openssl rand -hex 32)"
+
+curl -H "Authorization: Bearer $GOCSVIFY_AUTH_TOKEN" -F "file=@report.xlsx" http://localhost:8080/upload
+curl -H "Authorization: Bearer $GOCSVIFY_AUTH_TOKEN" "http://localhost:8080/check?key=<fileKey>"
+```
+
+Requests without a valid token get `401 Unauthorized` with `WWW-Authenticate: Bearer` and a JSON body `{"success": false, "message": "Unauthorized"}`.
+
+With Docker Compose pass the token through the environment instead of the settings file:
+
+```yaml
+services:
+  gocsvify:
+    environment:
+      GOCSVIFY_AUTH_TOKEN: ${GOCSVIFY_AUTH_TOKEN}
+```
+
+Do not commit a `settings.json` that contains a real token.
+
+### HTTPS (optional)
+
+The server speaks plain HTTP, so the token travels unencrypted. If the service is reachable over a network you do not control, put it behind a TLS-terminating reverse proxy. If you already have your own solution (Traefik, nginx, a cloud load balancer) or the service is only reachable locally, you can skip this section.
+
+The service listens on all network interfaces, so make sure nobody can bypass the proxy: close the service port with a firewall, or in Docker publish it on the loopback interface only (`127.0.0.1:8080:8080`, as in `docker-compose.yml` from the repository).
+
+Caddy obtains and renews certificates automatically:
+
+```
+api.example.com {
+    request_body {
+        max_size 256MB
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+nginx (the certificate is issued separately, for example with certbot):
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/api.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+
+    client_max_body_size 256m;       # not less than maxUploadSize
+    proxy_read_timeout   600s;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_request_buffering off;
+    }
+}
+```
+
+Note that nginx limits the request body to 1 MB by default: without `client_max_body_size` uploads of larger files fail with `413` before they reach the service.
+
+### Recommendations
+
+1. Run the service in a container or as a user with minimal privileges (the image built from the `Dockerfile` in the repository runs as an unprivileged user).
+2. If the service is reachable over a network, set `authToken` and restrict access to the port (`docker-compose.yml` in the repository publishes it on `127.0.0.1` only).
+3. Do not send the token over an unencrypted channel: use HTTPS (see above) or a trusted network.
+4. Limit the number of concurrent uploads at the proxy level.
 
 ## Testing
 
@@ -328,7 +407,7 @@ go test -short ./...   # skips the slowest tests (Northwind, mutation tests)
 
 The tests need the same Go 1.27+. Test files live in `converters/xls/testdata/` and `converters/accdb/testdata/` (`sample.xls`, `sample.accdb`, `northwind.accdb`).
 
-Covered: the HTTP server (`httptest`), the Job with a fake store and temporary directories, the daemon manager, the BoltDB store, settings, all three converters, the `xlslib` and `accdbread` parsers (including corrupted files), ZIP packing.
+Covered: the HTTP server and authorization (`httptest`), the Job with a fake store and temporary directories, the daemon manager, the BoltDB store, settings, all three converters, the `xlslib` and `accdbread` parsers (including corrupted files), ZIP packing.
 
 ## Extending
 
@@ -366,4 +445,4 @@ case ".yourformat":
 4. **Delimiter**: a single one-byte character only.
 5. **Large files**: XLS is read into memory entirely; very large files take longer and run into the 5-minute timeout.
 6. **Consistent values** across converters are not guaranteed (booleans, dates with zero time).
-7. **No API authorization.**
+7. **Authorization** is a single shared Bearer token: there are no per-user accounts, roles or rate limiting. TLS is not built in; use a reverse proxy (see [Security](#security)).
