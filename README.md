@@ -91,6 +91,7 @@ Missing keys fall back to the default values. Durations are either a Go duration
 | `lifeTime` | `60m` | How long to keep results, archives and temporary files |
 | `lifeTimeHistory` | `60m` | How long to keep source files in `history` |
 | `padRows` | `false` | Pad rows with empty cells up to the end of the range (xlsx) |
+| `restoreEmptyRows` | `false` | Restore empty rows that Excel omits from the file, so CSV row numbers match the sheet (xlsx; limit of about 10 million cells per sheet, see [`doc.md`](doc.md#output-format)) |
 | `delimiter` | `;` | CSV delimiter (a single one-byte character) |
 | `withHidden` | `false` | Convert hidden xlsx sheets |
 | `startServer` | `false` | Enable the HTTP server |

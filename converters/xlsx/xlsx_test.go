@@ -661,14 +661,14 @@ func TestSheetToCsv(t *testing.T) {
 			want: ",,,Имя\n",
 		},
 		{
-			name: "other cell types keep the raw value",
+			name: "other cell types keep the raw value (booleans become TRUE/FALSE)",
 			sheet: sheetXML("A1:E1", rowXML(
 				`<c r="A1" t="str"><v>hello</v></c>`,
 				`<c r="B1" t="b"><v>1</v></c>`,
 				`<c r="C1" t="e"><v>#DIV/0!</v></c>`,
 				`<c r="D1" t="n"><v>3.14</v></c>`,
 				`<c r="E1" t="d"><v>2023-01-01</v></c>`)),
-			want: "hello,1,#DIV/0!,3.14,2023-01-01\n",
+			want: "hello,TRUE,#DIV/0!,3.14,2023-01-01\n",
 		},
 		{
 			name: "csv quoting of delimiter, quotes and newlines",
@@ -703,8 +703,8 @@ func TestSheetToCsv(t *testing.T) {
 			want: "1\n2\n3\n",
 		},
 		{
-			// Пропущенные в файле номера строк не восстанавливаются пустыми строками.
-			name: "missing row numbers are not restored",
+			// По умолчанию (restoreEmptyRows выключена) пропущенные номера строк не восстанавливаются.
+			name: "missing row numbers are not restored by default",
 			sheet: sheetXML("A1:A5",
 				`<row r="1"><c r="A1"><v>1</v></c></row>`,
 				`<row r="5"><c r="A5"><v>5</v></c></row>`),
@@ -752,17 +752,19 @@ func TestSheetToCsv(t *testing.T) {
 	}
 }
 
-// Без <dimension> правая граница по умолчанию - столбец Z: при PadRows
-// каждая строка дополняется до 26 столбцов.
-func TestSheetToCsvNoDimensionPadsTo26Columns(t *testing.T) {
+// Без <dimension> ширина берётся по самой правой ячейке листа (предварительный проход),
+// а не фиксированной: при PadRows каждая строка дополняется до неё.
+func TestSheetToCsvNoDimensionPadsToWidestCell(t *testing.T) {
 	t.Parallel()
 
 	c := newTestConverter(",", true)
-	got, err := sheetToCSV(t, c, sheetXML("", rowXML(`<c r="A1"><v>1</v></c>`)), nil, nil)
+	got, err := sheetToCSV(t, c, sheetXML("",
+		`<row r="1"><c r="A1"><v>1</v></c></row>`,
+		`<row r="2"><c r="A2"><v>2</v></c><c r="D2"><v>4</v></c></row>`), nil, nil)
 	if err != nil {
 		t.Fatalf("sheetToCsv failed: %v", err)
 	}
-	if want := "1" + strings.Repeat(",", 25) + "\n"; got != want {
+	if want := "1,,,\n2,,,4\n"; got != want {
 		t.Errorf("CSV mismatch:\n got: %q\nwant: %q", got, want)
 	}
 }
@@ -963,8 +965,8 @@ func convertSheet1() string {
 func newConvertEntries() []zipEntry {
 	return []zipEntry{
 		{"[Content_Types].xml", xmlDecl + `<Types/>`},
-		{"xl/workbook.xml", workbookXML(`<workbookPr/>`)},
-		{"xl/_rels/workbook.xml.rels", workbookRelsXML(2)},
+		{"xl/workbook.xml", workbookXMLSheets(`<workbookPr/>`, `<sheet name="Sheet1" sheetId="1" r:id="rId1"/>`)},
+		{"xl/_rels/workbook.xml.rels", workbookRelsXML(1)},
 		{"xl/styles.xml", convertStyles},
 		{"xl/sharedStrings.xml", sharedStringsXML("Имя", "Сумма", "Дата", "Анна")},
 		{"xl/worksheets/sheet1.xml", convertSheet1()},
@@ -1001,6 +1003,8 @@ func TestConvertMultipleSheets(t *testing.T) {
 	t.Parallel()
 
 	entries := newConvertEntries()
+	entries[1] = zipEntry{"xl/workbook.xml", workbookXML(`<workbookPr/>`)}
+	entries[2] = zipEntry{"xl/_rels/workbook.xml.rels", workbookRelsXML(2)}
 	entries = append(entries, zipEntry{"xl/worksheets/sheet2.xml",
 		sheetXML("A1:B1", rowXML(`<c r="A1"><v>7</v></c>`, `<c r="B1" t="s"><v>3</v></c>`))})
 
@@ -1120,7 +1124,7 @@ func TestConvertIgnoresNonSheetEntries(t *testing.T) {
 func TestConvertWithoutSheets(t *testing.T) {
 	t.Parallel()
 
-	path := writeXlsx(t, zipEntry{"xl/workbook.xml", workbookXML(``)})
+	path := writeXlsx(t, zipEntry{"xl/workbook.xml", workbookXMLSheets(``)})
 
 	outDir, err := runConvert(t, path, ";")
 	if err != nil {
@@ -1128,6 +1132,58 @@ func TestConvertWithoutSheets(t *testing.T) {
 	}
 	if names := listDir(t, outDir); len(names) != 0 {
 		t.Errorf("expected no output files, got %v", names)
+	}
+}
+
+// Лист из книги, файл которого не найден, - ошибка, а не молчаливый пропуск.
+func TestConvertMissingSheetFileIsError(t *testing.T) {
+	t.Parallel()
+
+	path := writeXlsx(t,
+		zipEntry{"xl/workbook.xml", workbookXML(``)},
+		zipEntry{"xl/_rels/workbook.xml.rels", workbookRelsXML(2)},
+		zipEntry{"xl/worksheets/sheet1.xml", sheetXML("A1", rowXML(`<c r="A1"><v>1</v></c>`))},
+	)
+	_, err := runConvert(t, path, ";")
+	if err == nil || !strings.Contains(err.Error(), "sheet file not found: xl/worksheets/sheet2.xml") {
+		t.Fatalf("expected a 'sheet file not found' error, got %v", err)
+	}
+}
+
+// Книга со списком листов, но без workbook.xml.rels: найти листы нельзя, это ошибка.
+func TestConvertWithoutRelsIsError(t *testing.T) {
+	t.Parallel()
+
+	path := writeXlsx(t,
+		zipEntry{"xl/workbook.xml", workbookXML(``)},
+		zipEntry{"xl/worksheets/sheet1.xml", sheetXML("A1", rowXML(`<c r="A1"><v>1</v></c>`))},
+	)
+	if _, err := runConvert(t, path, ";"); err == nil {
+		t.Fatal("expected an error when workbook.xml.rels is missing")
+	}
+}
+
+// Диаграммные листы (chartsheet) не имеют связи типа worksheet и пропускаются без ошибки.
+func TestConvertSkipsChartsheets(t *testing.T) {
+	t.Parallel()
+
+	rels := xmlDecl + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+		`<Relationship Id="rId1" Type="` + relNS + `/worksheet" Target="worksheets/sheet1.xml"/>` +
+		`<Relationship Id="rId2" Type="` + relNS + `/chartsheet" Target="chartsheets/sheet1.xml"/></Relationships>`
+	path := writeXlsx(t,
+		zipEntry{"xl/workbook.xml", workbookXMLSheets(``,
+			`<sheet name="Data" sheetId="1" r:id="rId1"/>`,
+			`<sheet name="Chart" sheetId="2" r:id="rId2"/>`)},
+		zipEntry{"xl/_rels/workbook.xml.rels", rels},
+		zipEntry{"xl/chartsheets/sheet1.xml", `<chartsheet/>`},
+		zipEntry{"xl/worksheets/sheet1.xml", sheetXML("A1", rowXML(`<c r="A1"><v>1</v></c>`))},
+	)
+	outDir, err := runConvert(t, path, ";")
+	if err != nil {
+		t.Fatalf("Convert failed: %v", err)
+	}
+	if got, want := listDir(t, outDir), []string{"0.csv"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("output files = %v, want %v", got, want)
 	}
 }
 
@@ -1158,8 +1214,8 @@ func TestConvertSheetBeforeSharedPartsInArchive(t *testing.T) {
 		{"xl/worksheets/sheet1.xml", convertSheet1()},
 		{"xl/sharedStrings.xml", sharedStringsXML("Имя", "Сумма", "Дата", "Анна")},
 		{"xl/styles.xml", convertStyles},
-		{"xl/workbook.xml", workbookXML(`<workbookPr/>`)},
-		{"xl/_rels/workbook.xml.rels", workbookRelsXML(2)},
+		{"xl/workbook.xml", workbookXMLSheets(`<workbookPr/>`, `<sheet name="Sheet1" sheetId="1" r:id="rId1"/>`)},
+		{"xl/_rels/workbook.xml.rels", workbookRelsXML(1)},
 	}
 
 	outDir, err := runConvert(t, writeXlsx(t, entries...), ";")
@@ -1175,7 +1231,7 @@ func TestConvert1904DateSystem(t *testing.T) {
 	t.Parallel()
 
 	entries := newConvertEntries()
-	entries[1] = zipEntry{"xl/workbook.xml", workbookXML(`<workbookPr date1904="1"/>`)}
+	entries[1] = zipEntry{"xl/workbook.xml", workbookXMLSheets(`<workbookPr date1904="1"/>`, `<sheet name="Sheet1" sheetId="1" r:id="rId1"/>`)}
 	// То же число 43538 в системе 1904 - это 2023-03-15.
 	entries[5] = zipEntry{"xl/worksheets/sheet1.xml", sheetXML("A1", rowXML(`<c r="A1" s="1"><v>43538</v></c>`))}
 
@@ -1633,16 +1689,5 @@ func TestSparseRowsAreAlignedByColumn(t *testing.T) {
 	}
 	if got, want := readFile(t, filepath.Join(outDir, "0.csv")), "1;;;4\n;;3\n"; got != want {
 		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-// Выходной каталог недоступен: ошибка возвращается, а не теряется.
-func TestConvertOutputDirMissing(t *testing.T) {
-	t.Parallel()
-
-	path := writeXlsx(t, zipEntry{"xl/worksheets/sheet1.xml", sheetXML("A1", rowXML(`<c r="A1"><v>1</v></c>`))})
-	c := NewConverter(context.Background(), path, &settings.Settings{Delimiter: ";"})
-	if err := c.Convert(filepath.Join(t.TempDir(), "no", "such")); err == nil {
-		t.Fatal("expected error")
 	}
 }

@@ -12,30 +12,31 @@ import (
 )
 
 type Settings struct {
-	DirPathApp      string      `json:"appDir"`
-	DirPathIn       string      `json:"in"`
-	DirPathOut      string      `json:"out"`
-	DirPathFailed   string      `json:"failed"`
-	DirPathHistory  string      `json:"history"`
-	DirPathArchives string      `json:"archives"`
-	IsAbsPath       bool        `json:"isAbsPath"`
-	Sleep           ct.Duration `json:"sleep"`
-	IdleTimeout     ct.Duration `json:"idleTimeout"`
-	LifeTime        ct.Duration `json:"lifeTime"`
-	LifeTimeHistory ct.Duration `json:"lifeTimeHistory"`
-	PadRows         bool        `json:"padRows"`
-	Delimiter       string      `json:"delimiter"`
-	WithHidden      bool        `json:"withHidden"`
-	StartServer     bool        `json:"startServer"`
-	ServerPort      int         `json:"serverPort"`
-	AuthToken       string      `json:"authToken"`
-	WriteTimeout    ct.Duration `json:"writeTimeout"`
-	ReadTimeout     ct.Duration `json:"readTimeout"`
-	ReadHeadTimeout ct.Duration `json:"readHeadTimeout"`
-	MaxUploadSize   int64       `json:"maxUploadSize"`
-	LogLevel        string      `json:"logLevel"`
-	LogFile         string      `json:"logFile"`
-	UseMdbLib       bool        `json:"useMdbLib"`
+	DirPathApp       string      `json:"appDir"`
+	DirPathIn        string      `json:"in"`
+	DirPathOut       string      `json:"out"`
+	DirPathFailed    string      `json:"failed"`
+	DirPathHistory   string      `json:"history"`
+	DirPathArchives  string      `json:"archives"`
+	IsAbsPath        bool        `json:"isAbsPath"`
+	Sleep            ct.Duration `json:"sleep"`
+	IdleTimeout      ct.Duration `json:"idleTimeout"`
+	LifeTime         ct.Duration `json:"lifeTime"`
+	LifeTimeHistory  ct.Duration `json:"lifeTimeHistory"`
+	PadRows          bool        `json:"padRows"`
+	RestoreEmptyRows bool        `json:"restoreEmptyRows"`
+	Delimiter        string      `json:"delimiter"`
+	WithHidden       bool        `json:"withHidden"`
+	StartServer      bool        `json:"startServer"`
+	ServerPort       int         `json:"serverPort"`
+	AuthToken        string      `json:"authToken"`
+	WriteTimeout     ct.Duration `json:"writeTimeout"`
+	ReadTimeout      ct.Duration `json:"readTimeout"`
+	ReadHeadTimeout  ct.Duration `json:"readHeadTimeout"`
+	MaxUploadSize    int64       `json:"maxUploadSize"`
+	LogLevel         string      `json:"logLevel"`
+	LogFile          string      `json:"logFile"`
+	UseMdbLib        bool        `json:"useMdbLib"`
 }
 
 const DefaultSettingsPath = "settings.json"
@@ -176,30 +177,31 @@ func setDefaultSettings() (Settings, error) {
 
 func getDefaultSettings() Settings {
 	return Settings{
-		DirPathApp:      "./gocsvify_data",
-		DirPathIn:       "./gocsvify_data/in",
-		DirPathOut:      "./gocsvify_data/out",
-		DirPathFailed:   "./gocsvify_data/failed",
-		DirPathHistory:  "./gocsvify_data/history",
-		DirPathArchives: "./gocsvify_data/archives",
-		IsAbsPath:       false,
-		Sleep:           ct.Duration(10 * time.Second),
-		IdleTimeout:     ct.Duration(60 * time.Second),
-		LifeTime:        ct.Duration(60 * time.Minute),
-		LifeTimeHistory: ct.Duration(60 * time.Minute),
-		PadRows:         false,
-		Delimiter:       ";",
-		WithHidden:      false,
-		StartServer:     false,
-		ServerPort:      8080,
-		AuthToken:       "",
-		WriteTimeout:    0,
-		ReadTimeout:     ct.Duration(600 * time.Second),
-		ReadHeadTimeout: ct.Duration(30 * time.Second),
-		MaxUploadSize:   256,
-		LogLevel:        "info",
-		LogFile:         "",
-		UseMdbLib:       false,
+		DirPathApp:       "./gocsvify_data",
+		DirPathIn:        "./gocsvify_data/in",
+		DirPathOut:       "./gocsvify_data/out",
+		DirPathFailed:    "./gocsvify_data/failed",
+		DirPathHistory:   "./gocsvify_data/history",
+		DirPathArchives:  "./gocsvify_data/archives",
+		IsAbsPath:        false,
+		Sleep:            ct.Duration(10 * time.Second),
+		IdleTimeout:      ct.Duration(60 * time.Second),
+		LifeTime:         ct.Duration(60 * time.Minute),
+		LifeTimeHistory:  ct.Duration(60 * time.Minute),
+		PadRows:          false,
+		RestoreEmptyRows: false,
+		Delimiter:        ";",
+		WithHidden:       false,
+		StartServer:      false,
+		ServerPort:       8080,
+		AuthToken:        "",
+		WriteTimeout:     0,
+		ReadTimeout:      ct.Duration(600 * time.Second),
+		ReadHeadTimeout:  ct.Duration(30 * time.Second),
+		MaxUploadSize:    256,
+		LogLevel:         "info",
+		LogFile:          "",
+		UseMdbLib:        false,
 	}
 }
 

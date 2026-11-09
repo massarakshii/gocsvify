@@ -63,7 +63,7 @@ They implement the `Converter { Convert(csvPath string) error }` interface.
 
 | Format | Implementation |
 |--------|----------------|
-| XLSX/XLSM | XML archive parser; sheet order follows `workbook.xml`; hidden sheets are skipped (unless `withHidden` is on); without `workbook.xml`, sheets are ordered by the number in the file name (`sheet2` before `sheet10`); dates handle the 1900 leap-year bug and the 1904 date system |
+| XLSX/XLSM | XML archive parser; sheet order follows `workbook.xml`; sheet files are located through `workbook.xml.rels` (a `Target` relative to `xl/` or an absolute `/xl/...` path); hidden sheets are skipped (unless `withHidden` is on) and so are chart sheets; without `workbook.xml`, only `xl/worksheets/sheet*.xml` are sheets, ordered by the number in the file name (`sheet2` before `sheet10`); dates handle the 1900 leap-year bug and the 1904 date system; booleans are written as `TRUE`/`FALSE` |
 | XLS | own OLE2/BIFF8 parser (`libs/xlslib`) |
 | ACCDB/MDB | own Jet/ACE reader (`libs/accdbread`); with `useMdbLib: true` and `mdbtools` installed, `mdb-export`/`mdb-tables` are used |
 
@@ -162,6 +162,7 @@ JSON does not support comments; the example below is plain JSON.
   "lifeTime": "60m",
   "lifeTimeHistory": "60m",
   "padRows": false,
+  "restoreEmptyRows": false,
   "delimiter": ";",
   "withHidden": false,
   "startServer": true,
@@ -186,7 +187,8 @@ JSON does not support comments; the example below is plain JSON.
 | `idleTimeout` | How long the daemon waits for new files before stopping; `0` means never stop |
 | `lifeTime` | How long to keep results, archives and temporary files |
 | `lifeTimeHistory` | How long to keep source files in `history` |
-| `padRows` | Pad rows with empty cells up to the end of the range (xlsx) |
+| `padRows` | Pad rows with empty cells up to the end of the range (xlsx). The range is the sheet's `<dimension>`; without it, the rightmost cell of the sheet |
+| `restoreEmptyRows` | Restore empty rows that are missing from the file (xlsx), see [Output format](#output-format) |
 | `delimiter` | CSV delimiter, a single one-byte character |
 | `withHidden` | Convert hidden xlsx sheets |
 | `startServer`, `serverPort` | HTTP server and its port |
@@ -288,7 +290,8 @@ out/
 - **Delimiter**: from the settings; values containing the delimiter, quotes or line breaks are escaped following CSV rules.
 - **Encoding**: UTF-8, no BOM. No header is added: the first line is the first row of the sheet (for Access, the column names).
 - **Dates**: `2023-03-15` for a date without time, `2023-03-15 12:30:00` with time, `12:30:00` for a pure time. Access dates are always printed with time.
-- **Booleans**: `TRUE`/`FALSE` in XLS, `true`/`false` in Access.
+- **Booleans**: `TRUE`/`FALSE` in XLS and XLSX, `true`/`false` in Access.
+- **Empty rows in xlsx**: Excel does not store completely empty rows, so by default they are absent from the CSV and its row numbers may differ from the sheet. With `restoreEmptyRows: true` each missing row is written as an empty line of the full table width (the width of `<dimension>`, or up to the rightmost cell of the sheet if there is no `<dimension>`), independently of `padRows`; ordinary rows are padded only with `padRows`. Restored rows are limited to about 10 million cells per sheet in total: a gap that does not fit into the remaining limit is skipped entirely (a warning is written to the log), and the rows after it are still written. This protects against a file with a single cell in a far-away row.
 
 ### Example
 ```csv
@@ -303,6 +306,7 @@ Anna;30.5;2023-03-15
 3. **Panic during conversion**: recovered at the task level, status `error`, the worker keeps running.
 4. **Daemon shutdown**: the task goes back to `new`, the file stays in the input folder.
 5. **Unavailable store**: the file is moved to `failed`.
+6. **XLSX with unresolvable sheets**: if `workbook.xml` lists a sheet whose file is not in the archive, or `xl/_rels/workbook.xml.rels` is missing, the conversion fails with an error (`sheet file not found: ...`) instead of producing an incomplete result.
 
 Re-uploading a file with the same key (standalone mode) resets the status to `new` and replaces the previous result after a successful conversion.
 
@@ -312,7 +316,7 @@ Re-uploading a file with the same key (standalone mode) resets the status to `ne
 - The task queue and the result channel are buffered (100).
 - A single task has a 5-minute timeout.
 - xlsx is parsed as a stream and does not load a whole sheet into memory; xls is loaded into memory entirely.
-- **Empty rows.** Broken files with a huge number of empty rows produce a gigantic CSV. Skipping empty rows is not implemented yet (planned as an optional setting).
+- **Empty rows.** Rows that are explicitly present in the file are written as they are, so a broken file with a huge number of empty rows produces a gigantic CSV; skipping them is not implemented. Rows restored by `restoreEmptyRows` are capped at about 10 million cells per sheet. `padRows` has no size cap.
 
 ## Security
 
@@ -440,7 +444,7 @@ case ".yourformat":
 ## Known limitations
 
 1. **XLSM**: macros are not executed; the file is converted like a regular XLSX.
-2. **XLSX**: boolean cells (`t="b"`) are not supported, empty rows between non-empty ones are not restored, and absolute sheet paths (`/xl/worksheets/...`) in `workbook.xml.rels` are not recognized.
+2. **XLSX**: empty rows are restored only with `restoreEmptyRows` and only within the limit of about 10 million cells per sheet (see [Output format](#output-format)); by default CSV row numbers may differ from the sheet. Chart sheets are skipped.
 3. **Date and number formats**: complex custom formats may be interpreted incorrectly.
 4. **Delimiter**: a single one-byte character only.
 5. **Large files**: XLS is read into memory entirely; very large files take longer and run into the 5-minute timeout.

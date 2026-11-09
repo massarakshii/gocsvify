@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -52,6 +53,10 @@ type WorkBookPr struct {
 
 const defaultDelimiter = ";"
 
+// Лимит пустых ячеек на лист для restoreEmptyRows. Пропуск, не поместившийся в остаток,
+// не восстанавливается целиком (частичное восстановление сдвигало бы номера строк).
+const maxRestoredCells = 10_000_000
+
 func NewConverter(ctx context.Context, filePath string, settings *settings.Settings) *Converter {
 	return &Converter{
 		Ctx:       ctx,
@@ -82,45 +87,57 @@ func (u *Converter) Convert(csvPath string) error {
 			if err != nil {
 				return fmt.Errorf("failed to parse shared strings: %w", err)
 			}
-		}
-		if f.Name == "xl/workbook.xml" {
-			u.StartDate, err = u.getStartDate(f)
-			if err != nil {
-				return fmt.Errorf("failed to get the date system for formatting: %w", err)
-			}
+			continue
 		}
 		if f.Name == "xl/styles.xml" {
 			xlsxStyler, err = NewXlsxStyler(f)
 			if err != nil {
 				return fmt.Errorf("failed to create styles: %w", err)
 			}
+			continue
 		}
 		if f.Name == "xl/_rels/workbook.xml.rels" {
 			sheetsRelation, err = u.getSheetsRelation(f)
 			if err != nil {
 				return fmt.Errorf("failed to get the sheet list: %w", err)
 			}
+			continue
 		}
 		if f.Name == "xl/workbook.xml" {
+			u.StartDate, err = u.getStartDate(f)
+			if err != nil {
+				return fmt.Errorf("failed to get the date system for formatting: %w", err)
+			}
+
 			hasWorkbook = true
 			sheets, err = u.getSheets(f, u.Settings.WithHidden)
 			if err != nil {
 				return fmt.Errorf("failed to get the sheet list: %w", err)
 			}
+			continue
+		}
+		if strings.HasPrefix(f.Name, "docProps") || !strings.HasSuffix(f.Name, ".xml") {
+			continue
 		}
 
-		if strings.HasPrefix(f.Name, "xl/worksheets/sheet") && strings.HasSuffix(f.Name, ".xml") {
-			sheetFiles[f.Name] = f
-		}
+		sheetFiles[f.Name] = f
 	}
 
 	i := 0
 	if hasWorkbook {
+		if len(sheets) > 0 && sheetsRelation == nil {
+			return fmt.Errorf("xl/_rels/workbook.xml.rels not found: cannot locate the sheets")
+		}
 		for _, rId := range sheets {
-			sheetName := sheetsRelation[rId]
-			sheetFullName := filepath.Join("xl", sheetName)
-			if _, ok := sheetFiles[sheetFullName]; !ok {
+			sheetName, ok := sheetsRelation[rId]
+			if !ok {
+				// Не лист: диаграммный лист (chartsheet), лист диалога и т.п.
+				slog.Info("skipping a non-worksheet entry", "rId", rId)
 				continue
+			}
+			sheetFullName := resolveSheetPath(sheetName)
+			if _, ok := sheetFiles[sheetFullName]; !ok {
+				return fmt.Errorf("sheet file not found: %s", sheetFullName)
 			}
 			err = u.saveSheet(sheetFiles[sheetFullName], i, sharedStrings, xlsxStyler, csvPath)
 			if err != nil {
@@ -132,7 +149,9 @@ func (u *Converter) Convert(csvPath string) error {
 	} else {
 		names := make([]string, 0, len(sheetFiles))
 		for name := range sheetFiles {
-			names = append(names, name)
+			if strings.HasPrefix(name, "xl/worksheets/sheet") {
+				names = append(names, name)
+			}
 		}
 		sheetNum := func(name string) int {
 			s := strings.TrimSuffix(strings.TrimPrefix(name, "xl/worksheets/sheet"), ".xml")
@@ -301,6 +320,96 @@ func (u *Converter) formatDate(date float64) string {
 	return newDate.Format(format)
 }
 
+func (u *Converter) getColumnIndexes(file *zip.File) (int, int, error) {
+	rc, err := file.Open()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer rc.Close()
+
+	decoder := xml.NewDecoder(rc)
+
+	var startColumnIndex int
+	var endColumnIndex int
+
+	fileStartColumnIndex := u.getDigitKey("A")
+	fileEndColumnIndex := u.getDigitKey("A")
+
+	for {
+		if u.Ctx.Err() != nil {
+			return 0, 0, u.Ctx.Err()
+		}
+
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return 0, 0, err
+		}
+		switch se := token.(type) {
+		case xml.StartElement:
+			switch se.Name.Local {
+			case "dimension":
+				var dimension Dimension
+				if err := decoder.DecodeElement(&dimension, &se); err != nil {
+					return 0, 0, err
+				}
+				start, end, ok := strings.Cut(dimension.Ref, ":")
+				if ok {
+					startColumnIndex = u.getDigitKey(start)
+					endColumnIndex = u.getDigitKey(end)
+				} else {
+					startColumnIndex = u.getDigitKey(dimension.Ref)
+					endColumnIndex = u.getDigitKey(dimension.Ref)
+				}
+				return startColumnIndex, endColumnIndex, nil
+			case "c":
+				if !u.Settings.PadRows && !u.Settings.RestoreEmptyRows {
+					return fileStartColumnIndex, fileEndColumnIndex, nil
+				}
+				for _, attr := range se.Attr {
+					if attr.Name.Local != "r" || attr.Value == "" {
+						continue
+					}
+					fileColumnIndex := u.getDigitKey(attr.Value)
+					if fileColumnIndex < fileStartColumnIndex {
+						fileStartColumnIndex = fileColumnIndex
+					}
+					if fileColumnIndex > fileEndColumnIndex {
+						fileEndColumnIndex = fileColumnIndex
+					}
+				}
+				break
+			}
+			break
+		}
+	}
+
+	return fileStartColumnIndex, fileEndColumnIndex, nil
+}
+
+func (u *Converter) writeEmptyRows(writer *csv.Writer, count, width int, budget *int) error {
+	perRow := max(width, 1)
+	if count > *budget/perRow {
+		slog.Warn("A gap between rows is too large to restore", "emptyRows", count, "width", width)
+		return nil
+	}
+	*budget -= count * perRow
+
+	empty := make([]string, width)
+	for i := range count {
+		if i%1024 == 0 && u.Ctx.Err() != nil {
+			return u.Ctx.Err()
+		}
+		if err := writer.Write(empty); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (u *Converter) sheetToCsv(file *zip.File, sharedStrings []string, writer *csv.Writer, styler *XlsxStyler) error {
 	rc, err := file.Open()
 	if err != nil {
@@ -310,8 +419,19 @@ func (u *Converter) sheetToCsv(file *zip.File, sharedStrings []string, writer *c
 
 	decoder := xml.NewDecoder(rc)
 	var row []string
-	startColumnIndex := u.getDigitKey("A")
-	endColumnIndex := u.getDigitKey("Z")
+	startColumnIndex, endColumnIndex, err := u.getColumnIndexes(file)
+	if err != nil {
+		return err
+	}
+
+	width := endColumnIndex - startColumnIndex + 1
+	if width < 0 {
+		width = 0
+	}
+	maxRestoredCellsLocal := maxRestoredCells
+
+	currentRowIndex := 0
+	expectedRowIndex := 1
 	var currentColumnIndex int
 
 	for {
@@ -331,20 +451,20 @@ func (u *Converter) sheetToCsv(file *zip.File, sharedStrings []string, writer *c
 		switch se := token.(type) {
 		case xml.StartElement:
 			switch se.Name.Local {
-			case "dimension":
-				var dimension Dimension
-				if err := decoder.DecodeElement(&dimension, &se); err != nil {
-					return err
-				}
-				start, end, ok := strings.Cut(dimension.Ref, ":")
-				if ok {
-					startColumnIndex = u.getDigitKey(start)
-					endColumnIndex = u.getDigitKey(end)
-				} else {
-					startColumnIndex = u.getDigitKey(dimension.Ref)
-					endColumnIndex = u.getDigitKey(dimension.Ref)
-				}
 			case "row":
+				for _, attr := range se.Attr {
+					if attr.Name.Local == "r" {
+						currentRowIndex, _ = strconv.Atoi(attr.Value)
+					}
+				}
+
+				if u.Settings.RestoreEmptyRows && currentRowIndex > expectedRowIndex {
+					err := u.writeEmptyRows(writer, currentRowIndex-expectedRowIndex, width, &maxRestoredCellsLocal)
+					if err != nil {
+						return err
+					}
+					expectedRowIndex = currentRowIndex
+				}
 				row = []string{}
 				currentColumnIndex = startColumnIndex
 				break
@@ -382,6 +502,15 @@ func (u *Converter) sheetToCsv(file *zip.File, sharedStrings []string, writer *c
 						}
 					}
 					row = append(row, sb.String())
+				case "b":
+					switch strings.ToLower(strings.TrimSpace(c.Value)) {
+					case "1", "true":
+						row = append(row, "TRUE")
+					case "0", "false":
+						row = append(row, "FALSE")
+					default:
+						row = append(row, c.Value)
+					}
 				default:
 					styleId, err := strconv.Atoi(c.Style)
 					if err == nil && c.Value != "" && styler != nil && styler.CheckStyleDate(styleId) {
@@ -411,6 +540,7 @@ func (u *Converter) sheetToCsv(file *zip.File, sharedStrings []string, writer *c
 				if err := writer.Write(row); err != nil {
 					return err
 				}
+				expectedRowIndex++
 			}
 		}
 	}
@@ -420,6 +550,7 @@ func (u *Converter) sheetToCsv(file *zip.File, sharedStrings []string, writer *c
 
 type Relationship struct {
 	Target string `xml:"Target,attr"`
+	Type   string `xml:"Type,attr"`
 	Id     string `xml:"Id,attr"`
 }
 
@@ -453,7 +584,7 @@ func (u *Converter) getSheetsRelation(file *zip.File) (map[string]string, error)
 			if err := decoder.DecodeElement(&rs, &node); err != nil {
 				return nil, err
 			}
-			if strings.HasPrefix(rs.Target, "worksheets/sheet") && strings.HasSuffix(rs.Target, ".xml") {
+			if strings.HasSuffix(rs.Type, "/worksheet") {
 				data[rs.Id] = rs.Target
 			}
 		}
@@ -540,4 +671,11 @@ func prepareColumnKey(key string) string {
 		}
 		return r
 	}, key)
+}
+
+func resolveSheetPath(target string) string {
+	if rest, ok := strings.CutPrefix(target, "/"); ok {
+		return path.Clean(rest)
+	}
+	return path.Join("xl", target)
 }

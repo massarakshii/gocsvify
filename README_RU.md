@@ -91,6 +91,7 @@ curl -OJ "http://localhost:8080/download?key=<fileKey>&sheetNum=0"
 | `lifeTime` | `60m` | Сколько хранить результаты, архивы и временные файлы |
 | `lifeTimeHistory` | `60m` | Сколько хранить исходники в `history` |
 | `padRows` | `false` | Дополнять строки пустыми ячейками до конца диапазона (xlsx) |
+| `restoreEmptyRows` | `false` | Восстанавливать пустые строки, которые Excel не записывает в файл, чтобы номера строк в CSV совпадали с листом (xlsx; лимит около 10 млн ячеек на лист, см. [`doc_ru.md`](doc_ru.md#формат-выходных-данных)) |
 | `delimiter` | `;` | Разделитель CSV (один однобайтовый символ) |
 | `withHidden` | `false` | Конвертировать скрытые листы xlsx |
 | `startServer` | `false` | Включить HTTP-сервер |
